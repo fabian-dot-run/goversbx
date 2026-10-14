@@ -587,3 +587,12 @@ own `spec.yaml` as the reference for MCP registration):
   `sbx` CLI and must stay outside the sandbox's control.
 
 Not yet run against a real sbx host; see `docs/status.md` for the assumptions the next e2e run checks.
+
+## Revision (2026-10-14): Claude kit verified on the host
+
+Fourth real run of `scripts/e2e-claude.sh`, now creating both sandboxes with
+`sbx create --kit sandbox-kit/kits/goversbx-claude`: all checks passed. Confirmed: `sbx kit validate`
+accepts the mixin, it composes with the built-in `claude` agent (our install command runs after the
+claude kit's), the kit's `permissions.network.allow` alone makes the daemon reachable, and the
+install-time `claude mcp add` plus the `files/home/` skill are in place before Claude runs. Open
+question 2 is closed. The mixin's agent-instructions file was not found in the sandbox (harmless).

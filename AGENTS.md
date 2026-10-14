@@ -235,6 +235,7 @@ validate` only runs on the host, as step 0 of `scripts/e2e-claude.sh`). The pi a
 config merging is tested against fresh, existing, and malformed configs (plus named profiles and a
 missing JS runtime). The pi merge is verified against real pi 1.2.0 (`pi mcp list` connects and
 lists both tools as `direct`, the placeholder header is sent verbatim, pi's resource loader
-discovers the skill); the omp script has not been run against a real omp installation, and neither
-pi nor omp kit has been applied with real `sbx` yet. Note that pi's exported `loadSkills()` does not scan
+discovers the skill); the omp script has not been run against a real omp installation. The
+`goversbx-claude` kit passed the full host e2e (2026-10-14); the pi and omp kits have not been
+applied with real `sbx` yet. Note that pi's exported `loadSkills()` does not scan
 `~/.agents/skills` - use `DefaultResourceLoader` if you ever re-check skill discovery that way.

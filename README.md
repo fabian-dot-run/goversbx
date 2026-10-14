@@ -140,4 +140,4 @@ End-to-end test against a real sbx host: `scripts/e2e-claude.sh` (run on the hos
 sandbox identity, proxy substitution, approval -> `sbx policy allow` -> host reachable, identity
 isolation between sandboxes, and real Claude Code calling the tools. Automated: unit tests plus
 `javalin-testtools` integration tests for the admin API, the registration endpoint and the MCP
-endpoint (`./gradlew check`). The sbx kits are new and still waiting for their first host run.
+endpoint (`./gradlew check`). The Claude kit is verified on the host too (`sbx create --kit`, nothing installed by hand).

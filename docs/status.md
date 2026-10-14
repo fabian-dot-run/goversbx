@@ -24,32 +24,32 @@ The run's only 2 FAILs were the script's own `sbx policy ls <n> | grep <host>` c
 summary ("allow 12 hosts from ...") instead of hosts. Fixed: it now tries `policy ls --format json`
 and otherwise only notes it - the reachability check is the proof.
 
-## sandbox-kit is now a real sbx kit (2026-10-14, not yet run on a host)
+## sandbox-kit is a real sbx kit - verified on the host (fourth real run, 2026-10-14)
 
-`sandbox-kit/kits/goversbx-{claude,pi,omp}/` are sbx v2 **mixin** kits. A new Claude sandbox gets
-the MCP registration, the network rule for the daemon, and the skill from
-`sbx create --kit sandbox-kit/kits/goversbx-claude --name N claude <ws>` - nothing is installed
-by hand any more. `scripts/e2e-claude.sh` now validates the kit (`sbx kit validate`), creates both
-sandboxes with `--kit`, no longer adds the daemon's network rule itself (it FAILs if the kit's
-allow-list doesn't work, then falls back to explicit rules to test the rest), and checks that
-`claude mcp list` and the skill came from the kit. Checked here only against `fake-sbx` (all PASS)
-and by parsing the specs; **next: run `scripts/e2e-claude.sh` on the host.**
+`sandbox-kit/kits/goversbx-{claude,pi,omp}/` are sbx v2 **mixin** kits. `scripts/e2e-claude.sh`
+now validates the kit (`sbx kit validate`), creates both sandboxes with
+`sbx create --kit sandbox-kit/kits/goversbx-claude ...` and installs nothing by hand - and every
+check passed on the user's host:
 
-Unverified assumptions in the Claude kit, in order of risk:
-- a v2 mixin composes with the built-in `claude` agent on the user's sbx (recent release notes
-  introduce v3 kits and say v3 can't be mixed with v1/v2 - but v2 stays supported for built-in
-  agents);
-- `localhost:8787` in a kit's `permissions.network.allow` behaves like
-  `sbx policy allow network localhost:8787` (the e2e step 3 checks exactly this);
-- `${{ kit.args.* }}` substitution is supported by the user's sbx version (only defaults are used
-  unless the daemon port changes).
+- `sbx kit validate`: valid; the v2 mixin composes with the built-in `claude` agent, our install
+  command runs after the claude kit's own (`kit=goversbx-claude, user=agent`), the startup fallback
+  is queued;
+- the kit's `permissions.network.allow` (`localhost:8787`, `host.docker.internal:8787`) alone lets
+  the sandbox reach the daemon - no `sbx policy allow` by hand;
+- `claude mcp list`: `goversbx-network ... ✔ Connected`; skill at
+  `~/.claude/skills/goversbx-network-access/SKILL.md`;
+- the whole MCP/identity/approval flow from the MVP run, including real Claude Code, unchanged.
+
+Not found: the mixin's `agentInstructions` file (the script's search for "goversbx" in `*.md` under
+`/home/agent` and the workspace came up empty). Harmless - the skill carries the guidance - but where
+sbx writes mixin kits-memory is still unknown.
 
 The daemon itself can't be started by a kit (kit hooks run inside the sandbox; the daemon needs the
 host's `sbx` CLI and must stay outside the sandbox's control). A host-side wrapper that starts the
 daemon if needed and then runs `sbx run --kit ...` is a possible next step.
 
-**Next steps**: host e2e run with the kit; then pi/oh-my-pi end to end (their kits exist, never
-applied with real sbx); then the out-of-scope items (persistence, revocation, admin authn).
+**Next steps**: optional host wrapper (start daemon + `sbx run --kit`); pi/oh-my-pi end to end (their
+kits exist, never applied with real sbx); then the out-of-scope items (persistence, revocation, admin authn).
 
 ### How we got there
 
@@ -220,16 +220,15 @@ becomes reachable from that sandbox.
    localhost:8787 --sandbox <n>`; the proxy treats that traffic as `localhost`, so identity secrets
    use `--host localhost`. (`daemon.internal` from the original design never existed; kit defaults
    are now `host.docker.internal`.)
-2. **Installing the kit into new sandboxes.** Implemented as v2 mixin kits
-   (`sandbox-kit/kits/`, applied with `sbx create|run --kit <dir|git|zip>` or `sbx kit add`); waits
-   for a host e2e run. Known gap from the kit docs: `sbx kit add` of a mixin doesn't write its
+2. ~~Installing the kit into new sandboxes.~~ **Resolved:** v2 mixin kits (`sandbox-kit/kits/`,
+   `sbx create|run --kit <dir|git|zip>` or `sbx kit add`), verified for Claude on the host. Known gap from the kit docs: `sbx kit add` of a mixin doesn't write its
    agent instructions (kits-memory) - harmless here, the skill carries the same guidance.
 3. **Daemon state is in-memory** - pending requests and the "already registered" set are lost on
    restart (registration is idempotent, so only one extra retry per sandbox).
 
 ## Backlog (after the Claude MVP works)
 
-- Run the kit-based e2e on the host (open question 2); optional host wrapper that starts the daemon.
+- Optional host wrapper that starts the daemon and runs `sbx run --kit ...`; find where mixin agent instructions land.
 - Verify oh-my-pi against a real omp install (needs Bun); add opencode (`~/.config/opencode/opencode.json`, `"type": "remote"`).
 - Out of MVP scope so far: revocation/expiry of approvals, persistence, authn on the admin UI
   (currently only protected by loopback binding), audit log, deny reason back to the agent.
