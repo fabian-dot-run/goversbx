@@ -74,8 +74,15 @@ new request with Approve/Deny actions from a service worker (`sw.js`); notificat
 request is decided elsewhere. The daemon side is a listener API in `networkaccess.api`
 (`NetworkAccessListener`, `NetworkAccessService.subscribe`) - the hook for later channels (native
 macOS, Telegram). Verified: unit + SSE integration tests, and a curl run against the real daemon
-(MCP call -> `created` -> approve -> `decided`, tool returned "Approved"). Not yet verified in a real
-browser (a headless Firefox download here needs approval for `cdn.playwright.dev`).
+(MCP call -> `created` -> approve -> `decided`, tool returned "Approved"). Browser: headless Firefox
+157 via Playwright against the real daemon - live indicator, service worker active, pending row
+appears without reload, exactly one notification per request (title "<sandbox> wants <host>",
+reason as body, tag = request id, actions approve/deny, requireInteraction), closed again after the
+approval, request moves to "Decided". Headless Firefox has no OS notification backend
+(`showNotification` -> `NS_ERROR_FAILURE`), so that run recorded the notification calls instead; the
+UI now catches that error and tells the user to check the OS notification settings. Not covered:
+clicking the buttons inside a real macOS notification (`sw.js` posts to the same approve/deny
+endpoints the page uses).
 
 **Next steps**: restart the daemon (`scripts/goversbx stop && scripts/goversbx start`), then rerun
 `scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their

@@ -126,21 +126,28 @@ async function notifyCreated(r) {
     requireInteraction: true,
     data: { id: r.id },
   };
-  if (swRegistration) {
-    await swRegistration.showNotification(title, {
-      ...options,
-      actions: [
-        { action: 'approve', title: 'Approve' },
-        { action: 'deny', title: 'Deny' },
-      ],
-    });
-  } else {
-    // No service worker: a plain notification without buttons that opens the request.
-    const notification = new Notification(title, options);
-    notification.onclick = () => {
-      window.focus();
-      showRequest(r.id);
-    };
+  try {
+    if (swRegistration) {
+      await swRegistration.showNotification(title, {
+        ...options,
+        actions: [
+          { action: 'approve', title: 'Approve' },
+          { action: 'deny', title: 'Deny' },
+        ],
+      });
+    } else {
+      // No service worker: a plain notification without buttons that opens the request.
+      const notification = new Notification(title, options);
+      notification.onclick = () => {
+        window.focus();
+        showRequest(r.id);
+      };
+    }
+  } catch (e) {
+    // E.g. the OS doesn't let the browser show notifications (macOS: System Settings > Notifications).
+    console.warn('goversbx: could not show a notification', e);
+    document.querySelector('#notify-state').textContent =
+      'Could not show a notification - check that your OS allows this browser to send notifications.';
   }
 }
 
