@@ -88,6 +88,24 @@ class SandboxIdentityServiceTest {
     }
 
     @Test
+    void onlyRegistersSandboxesMatchingThePattern() {
+        List<Call> calls = new CopyOnWriteArrayList<>();
+        SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {
+            calls.add(new Call(sandboxName, targetHost, envVarName, placeholder, value));
+            return new SbxCustomSecretPort.Result(true, "ok");
+        };
+
+        SandboxIdentityService service = new SandboxIdentityService(
+                port, listing("goversbx-e2e-1", "claude-goversbx", "goversbx-e2e-1-b"),
+                "daemon.internal", "VAR", "placeholder", java.util.regex.Pattern.compile("goversbx-e2e-1(-b)?"));
+
+        service.registerAnyUnregisteredSandboxes();
+
+        assertEquals(List.of("goversbx-e2e-1", "goversbx-e2e-1-b"),
+                calls.stream().map(Call::sandboxName).toList());
+    }
+
+    @Test
     void doesNotReRegisterAnAlreadyRegisteredSandbox() {
         List<Call> calls = new CopyOnWriteArrayList<>();
         SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {

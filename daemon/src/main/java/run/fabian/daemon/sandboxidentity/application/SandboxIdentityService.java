@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Registers the placeholder-substitution secret that lets a sandbox's MCP requests carry a
@@ -26,16 +27,29 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
     private final String targetHost;
     private final String envVarName;
     private final String placeholder;
+    private final Pattern sandboxNamePattern;
     private final Set<String> registered = ConcurrentHashMap.newKeySet();
 
     public SandboxIdentityService(
             SbxCustomSecretPort secretPort, SbxSandboxListPort listPort,
             String targetHost, String envVarName, String placeholder) {
+        this(secretPort, listPort, targetHost, envVarName, placeholder, Pattern.compile(".*"));
+    }
+
+    /**
+     * @param sandboxNamePattern only running sandboxes whose full name matches are registered by
+     *     {@link #registerAnyUnregisteredSandboxes()} - lets a test run (or a shared host) avoid
+     *     touching unrelated sandboxes. Explicit {@link #register(String)} calls are not filtered.
+     */
+    public SandboxIdentityService(
+            SbxCustomSecretPort secretPort, SbxSandboxListPort listPort,
+            String targetHost, String envVarName, String placeholder, Pattern sandboxNamePattern) {
         this.secretPort = secretPort;
         this.listPort = listPort;
         this.targetHost = targetHost;
         this.envVarName = envVarName;
         this.placeholder = placeholder;
+        this.sandboxNamePattern = sandboxNamePattern;
     }
 
     @Override
@@ -46,7 +60,7 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
     @Override
     public void registerAnyUnregisteredSandboxes() {
         for (String sandboxName : listPort.listRunningSandboxNames()) {
-            if (registered.contains(sandboxName)) {
+            if (registered.contains(sandboxName) || !sandboxNamePattern.matcher(sandboxName).matches()) {
                 continue;
             }
             SandboxRegistrationResult result = register(sandboxName);

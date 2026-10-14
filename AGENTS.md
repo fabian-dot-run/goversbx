@@ -92,7 +92,7 @@ Identity travels as an HTTP header (`X-Goversbx-Sandbox-Name`, see `McpContext`'
 per-process `$SANDBOX_NAME` env var now that one daemon process serves every sandbox.
 
 This header is **proxy-verified, not self-reported**, via a confirmed, public `sbx` feature:
-`sbx secret set-custom --sandbox <name> --target <host> --env <VAR> --placeholder <p> --value <v>`
+`sbx secret set-custom --sandbox <name> --host <host> --env <VAR> --placeholder <p> --value <v>`
 makes the sbx proxy rewrite `<p>` to `<v>` in every outbound HTTP header sent to `<host>` -
 confirmed to work for arbitrary custom headers (not just `Authorization`), confirmed scopable
 per-sandbox, and - this is the important part - **confirmed to apply to already-running sandboxes
@@ -124,6 +124,16 @@ without a restart** (checked directly against `docker/sbx-releases`' GitHub rele
 The admin-only `POST /api/sandboxes/{name}/register` endpoint still exists for pre-warming a
 sandbox manually, but nothing requires it anymore - don't assume it's the only path a sandbox gets
 registered through.
+
+- The flag is `--host`, not `--target` (`--target` only exists in an old example, docker/sbx-releases#7;
+  the first real e2e run failed on it). sbx flag names have churned - prefer a real invocation from
+  an issue or `sbx <cmd> --help` output over doc summaries.
+- `registerAnyUnregisteredSandboxes()` registers every running sandbox matching
+  `GOVERSBX_IDENTITY_SANDBOX_PATTERN` (default `.*`, i.e. all of them - including sandboxes that have
+  nothing to do with goversbx). Narrow it for test runs.
+- sbx keys custom secrets by placeholder (docker/sbx-releases#230) and we use one placeholder for
+  every sandbox. That per-sandbox `--sandbox` scoping keeps them apart is exactly what step 4b of
+  `scripts/e2e-claude.sh` checks against a real host - see `docs/status.md` for the fallback if not.
 
 ## Testing conventions
 

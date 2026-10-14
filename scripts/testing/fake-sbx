@@ -6,7 +6,8 @@
 #
 # "Sandboxes" are just names; `exec` runs locally. Simulates proxy placeholder substitution:
 # once `secret set-custom --sandbox N ... --placeholder P --value V` ran, `exec N` sees PLACEHOLDER=V
-# (set FAKE_SBX_NO_SUBSTITUTION=1 to simulate the proxy not substituting). Reachability probes
+# (FAKE_SBX_NO_SUBSTITUTION=1 simulates the proxy not substituting, FAKE_SBX_PLACEHOLDER_KEYED=1
+# simulates all sandboxes sharing one secret because they share the placeholder). Reachability probes
 # (`curl -w %{http_code} https://HOST`) are answered from the recorded policy (200 if allowed for that
 # sandbox, else 403), so no real blocked requests - and no approval prompts on the host - are made.
 # Keep SKIP_CLAUDE=1: the Claude step would modify the real ~/.claude.json of whoever runs it.
@@ -33,7 +34,10 @@ case "$cmd" in
       if grep -q "^$host $name\$" "$STATE/policy" 2>/dev/null; then echo 200; else echo 403; fi
       exit 0
     fi
-    sub=""; [ -z "${FAKE_SBX_NO_SUBSTITUTION:-}" ] && [ -f "$STATE/secret-$name" ] && sub="PLACEHOLDER=$(cat "$STATE/secret-$name")"
+    # FAKE_SBX_PLACEHOLDER_KEYED=1 simulates secrets keyed by placeholder alone (last registration
+    # wins for every sandbox) - the collision the e2e script's step 4b is there to detect.
+    secret_file="$STATE/secret-$name"; [ -n "${FAKE_SBX_PLACEHOLDER_KEYED:-}" ] && secret_file="$STATE/secret-shared"
+    sub=""; [ -z "${FAKE_SBX_NO_SUBSTITUTION:-}" ] && [ -f "$secret_file" ] && sub="PLACEHOLDER=$(cat "$secret_file")"
     env "${envs[@]}" $sub "$@" ;;
   rm) echo "removed" ;;
   policy)
@@ -43,8 +47,21 @@ case "$cmd" in
       ls) grep " $1\$" "$STATE/policy" 2>/dev/null ;;
     esac ;;
   secret)
-    # secret set-custom --sandbox N --target T --env E --placeholder P --value V
-    shift; while [ $# -gt 0 ]; do case "$1" in --sandbox) n="$2";; --value) v="$2";; esac; shift 2; done
-    echo "$v" > "$STATE/secret-$n"; echo "secret set for $n" ;;
+    sub="$1"; shift
+    case "$sub" in
+      set-custom)
+        # Same flags as the real CLI (sbx docs + docker/sbx-releases#650); unknown flags are rejected
+        # the way sbx does, so a wrong flag in the daemon shows up here too.
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --sandbox) n="$2";; --value) v="$2";; --host|--env|--placeholder) ;;
+            *) echo "error: unknown flag: $1"; echo "  try: sbx secret set-custom --help"; exit 1 ;;
+          esac; shift 2
+        done
+        if [ -n "${FAKE_SBX_PLACEHOLDER_KEYED:-}" ]; then echo "$v" > "$STATE/secret-shared"; else echo "$v" > "$STATE/secret-$n"; fi
+        echo "secret set for $n" ;;
+      rm) echo "removed secret" ;;
+      *) echo "fake sbx: unsupported secret $sub" >&2; exit 1 ;;
+    esac ;;
   *) echo "fake sbx: unsupported $cmd" >&2; exit 1 ;;
 esac

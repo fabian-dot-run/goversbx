@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public final class Main {
 
@@ -36,6 +37,7 @@ public final class Main {
         String identityTargetHost = env("GOVERSBX_IDENTITY_TARGET_HOST", "daemon.internal");
         String identityEnvVar = env("GOVERSBX_IDENTITY_ENV_VAR", "GOVERSBX_SANDBOX_TOKEN");
         String identityPlaceholder = env("GOVERSBX_IDENTITY_PLACEHOLDER", "goversbx-sandbox-identity-placeholder-v1");
+        Pattern identitySandboxPattern = Pattern.compile(env("GOVERSBX_IDENTITY_SANDBOX_PATTERN", ".*"));
         List<String> lsFormatArgs = List.of(env("GOVERSBX_SBX_LS_FORMAT_ARGS", "--format json").split(" "));
 
         RequestRepository repository = new InMemoryRequestRepository();
@@ -45,7 +47,8 @@ public final class Main {
         SbxCustomSecretPort sbxCustomSecretPort = new SbxCliCustomSecretAdapter(sbxBinary, dryRun);
         SbxSandboxListPort sbxSandboxListPort = new SbxCliSandboxListAdapter(sbxBinary, lsFormatArgs);
         SandboxIdentityService sandboxIdentityService = new SandboxIdentityService(
-                sbxCustomSecretPort, sbxSandboxListPort, identityTargetHost, identityEnvVar, identityPlaceholder);
+                sbxCustomSecretPort, sbxSandboxListPort, identityTargetHost, identityEnvVar, identityPlaceholder,
+                identitySandboxPattern);
 
         McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService);
 

@@ -515,3 +515,27 @@ Verification: fresh home, existing config (other servers and top-level keys like
 `disabledServers` preserved, idempotent), named profile (written to the profile's dir only),
 malformed config (exit 1, untouched), and no JS runtime on `PATH` (exit 1, nothing created). Not
 run against a real omp installation, and the `bun -e` path is untested (no Bun here).
+
+## Revision (2026-10-14): first real e2e run, `--host` not `--target`
+
+`scripts/e2e-claude.sh` (added for this purpose) ran on the user's macOS host for the first time.
+Confirmed against real `sbx`: `sbx create --name N claude DIR`, `sbx exec`, `sbx policy allow
+network localhost:8787 --sandbox N` (sandbox then reaches the daemon at `host.docker.internal:8787`),
+the sandbox's `HTTP(S)_PROXY` pointing at `gateway.docker.internal:3128`, and `sbx ls --format json`.
+
+Failed: `sbx secret set-custom` rejected `--target` (`error: unknown flag: --target`). The earlier
+revisions above took `--target` from docker/sbx-releases#7, an example from when the feature was
+experimental; the current flag is `--host` (repeatable, supports `*`/`**` wildcards), confirmed by a
+real invocation in docker/sbx-releases#650. Fixed in `SbxCliCustomSecretAdapter`; references to
+`--target` in the earlier revision sections above are historical and wrong.
+
+The run also showed `registerAnyUnregisteredSandboxes()` registering every running sandbox on the
+host, including unrelated ones (they all failed on the flag, so nothing changed). New
+`GOVERSBX_IDENTITY_SANDBOX_PATTERN` (regex, default `.*`) limits that; the e2e script restricts it
+to its own sandboxes.
+
+New risk found in the same research: docker/sbx-releases#230 describes custom secrets as keyed by
+placeholder, and goversbx deliberately uses one placeholder for every sandbox. Whether `--sandbox`
+scoping keeps per-sandbox values apart is not documented; the e2e script now creates a second
+sandbox and checks that each sandbox's request arrives under its own name (step 4b). Fallback if it
+doesn't: per-sandbox placeholders derived from the sandbox name (see `docs/status.md`).

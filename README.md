@@ -76,7 +76,7 @@ Every sandbox's MCP registration (whatever the agent) sends the *same hardcoded 
 and never read from a per-sandbox env var (see `docs/plan.md`'s third 2026-10-14 revision for why
 a hardcoded literal, not an env-var lookup, is the whole point). The first time the daemon sees
 that literal arrive unsubstituted from some sandbox, it automatically lists every running sandbox
-(`sbx ls`) and registers any it doesn't know about yet via `sbx secret set-custom --target
+(`sbx ls`) and registers any it doesn't know about yet via `sbx secret set-custom --host
 daemon.internal --value <name>`, then asks the agent to retry. From then on, the sbx proxy rewrites
 the placeholder to that sandbox's real name on every outbound header to the daemon - the sandbox
 itself never sees or controls the real value. No operator action is required for this to happen.
@@ -88,6 +88,8 @@ curl -X POST http://localhost:8788/api/sandboxes/<sandbox-name>/register
 ```
 
 `GOVERSBX_IDENTITY_TARGET_HOST`/`_ENV_VAR`/`_PLACEHOLDER` customize the registration details;
+`GOVERSBX_IDENTITY_SANDBOX_PATTERN` (regex, default `.*`) limits which running sandboxes get
+registered automatically (the e2e test uses it to leave the host's other sandboxes alone);
 `GOVERSBX_SBX_LS_FORMAT_ARGS` (default `--format json`) customizes the `sbx ls` invocation, since
 that flag's spelling changed across `sbx` versions (`--json` before v0.48.0).
 

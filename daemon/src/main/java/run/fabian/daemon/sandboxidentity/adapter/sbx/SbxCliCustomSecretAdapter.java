@@ -28,7 +28,7 @@ public final class SbxCliCustomSecretAdapter implements SbxCustomSecretPort {
         List<String> command = List.of(
                 sbxBinary, "secret", "set-custom",
                 "--sandbox", sandboxName,
-                "--target", targetHost,
+                "--host", targetHost,
                 "--env", envVarName,
                 "--placeholder", placeholder,
                 "--value", value);

@@ -56,8 +56,11 @@ DAEMON_LOG="$RUN_DIR/daemon.log"
 ADMIN="http://127.0.0.1:$ADMIN_PORT"
 DAEMON_URL_FROM_SANDBOX="http://$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT"
 
+SANDBOX_B="$SANDBOX_NAME-b"   # second throwaway sandbox, only to check identities stay per sandbox
+IDENTITY_HOST_B="goversbx-e2e-identity-check.invalid"   # never contacted; its request gets denied
+
 DAEMON_PID=""
-SANDBOX_CREATED=0
+CREATED_SANDBOXES=""
 FAILURES=0
 
 c_green=$'\033[32m'; c_red=$'\033[31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
@@ -75,14 +78,17 @@ cleanup() {
     kill "$DAEMON_PID" 2>/dev/null; wait "$DAEMON_PID" 2>/dev/null
     info "daemon stopped (log: $DAEMON_LOG)"
   fi
-  if [ "$SANDBOX_CREATED" = 1 ]; then
+  for sb in $CREATED_SANDBOXES; do
     if [ "${KEEP_SANDBOX:-0}" = 1 ]; then
-      info "KEEP_SANDBOX=1 - sandbox $SANDBOX_NAME kept; remove with: $SBX rm --force $SANDBOX_NAME"
-    else
-      "$SBX" rm --force "$SANDBOX_NAME" >/dev/null 2>&1 && info "sandbox $SANDBOX_NAME removed" \
-        || info "could not remove $SANDBOX_NAME - remove manually: $SBX rm --force $SANDBOX_NAME"
+      info "KEEP_SANDBOX=1 - sandbox $sb kept; remove with: $SBX rm --force $sb"
+      continue
     fi
-  fi
+    # Best effort: sandbox-scoped custom secrets are keyed by placeholder; remove ours explicitly in
+    # case removing the sandbox doesn't (sbx docs: `sbx secret rm ... --placeholder ...`).
+    "$SBX" secret rm --sandbox "$sb" --placeholder "$PLACEHOLDER" --force >/dev/null 2>&1
+    "$SBX" rm --force "$sb" >/dev/null 2>&1 && info "sandbox $sb removed" \
+      || info "could not remove $sb - remove manually: $SBX rm --force $sb"
+  done
   echo
   if [ "$FAILURES" -eq 0 ]; then
     printf '%sE2E PASSED%s\n' "$c_green" "$c_off"
@@ -163,6 +169,7 @@ mkdir -p "$WORKSPACE"
 GOVERSBX_SBX_DRY_RUN=false \
 GOVERSBX_SBX_BINARY="$SBX" \
 GOVERSBX_IDENTITY_TARGET_HOST="$SANDBOX_DAEMON_HOST" \
+GOVERSBX_IDENTITY_SANDBOX_PATTERN="$SANDBOX_NAME(-b)?" \
 GOVERSBX_SANDBOX_API_PORT="$SANDBOX_API_PORT" \
 GOVERSBX_ADMIN_PORT="$ADMIN_PORT" \
   java -jar "$REPO_DIR/daemon/build/libs/goversbx-daemon.jar" >"$DAEMON_LOG" 2>&1 &
@@ -173,15 +180,24 @@ for _ in $(seq 1 30); do
 done
 curl -s -o /dev/null "$ADMIN/api/health" || { tail -30 "$DAEMON_LOG"; die "daemon did not come up"; }
 pass "daemon running (pid $DAEMON_PID), admin UI $ADMIN"
+info "sandbox identity registration limited to $SANDBOX_NAME and $SANDBOX_B - other sandboxes are not touched"
 
 # ---------------------------------------------------------------------------------------------
-step "2. Create throwaway sandbox"
+step "2. Create throwaway sandboxes"
 cp -R "$REPO_DIR/sandbox-kit/skill" "$REPO_DIR/sandbox-kit/agents" "$WORKSPACE/"
 if out="$("$SBX" create --name "$SANDBOX_NAME" claude "$WORKSPACE" 2>&1)"; then
-  SANDBOX_CREATED=1
+  CREATED_SANDBOXES="$SANDBOX_NAME"
   pass "sbx create --name $SANDBOX_NAME claude $WORKSPACE"
 else
   echo "$out"; die "sbx create failed"
+fi
+# Second sandbox (no workspace): created now so the first reactive registration covers both, which
+# is what can reveal identities colliding (both share the same placeholder).
+if out="$("$SBX" create --name "$SANDBOX_B" claude 2>&1)"; then
+  CREATED_SANDBOXES="$CREATED_SANDBOXES $SANDBOX_B"
+  pass "sbx create --name $SANDBOX_B claude (second sandbox, for the identity-isolation check)"
+else
+  fail "sbx create --name $SANDBOX_B claude failed - identity-isolation check will be skipped: $out"
 fi
 status="$("$SBX" ls --format json 2>/dev/null | jq -r --arg n "$SANDBOX_NAME" '.[] | select(.name == $n) | .status')"
 info "sandbox status after create: ${status:-unknown}"
@@ -194,15 +210,19 @@ fi
 # ---------------------------------------------------------------------------------------------
 step "3. Let the sandbox reach the daemon"
 health_from_sandbox() { in_sandbox 'curl -sS --max-time 10 "$DAEMON_URL/api/health" 2>&1'; }
-if out="$("$SBX" policy allow network "localhost:$SANDBOX_API_PORT" --sandbox "$SANDBOX_NAME" 2>&1)"; then
-  pass "sbx policy allow network localhost:$SANDBOX_API_PORT --sandbox $SANDBOX_NAME"
-else
-  fail "sbx policy allow network localhost:$SANDBOX_API_PORT --sandbox $SANDBOX_NAME failed: $out"
-fi
+for sb in $CREATED_SANDBOXES; do
+  if out="$("$SBX" policy allow network "localhost:$SANDBOX_API_PORT" --sandbox "$sb" 2>&1)"; then
+    pass "sbx policy allow network localhost:$SANDBOX_API_PORT --sandbox $sb"
+  else
+    fail "sbx policy allow network localhost:$SANDBOX_API_PORT --sandbox $sb failed: $out"
+  fi
+done
 h="$(health_from_sandbox)"
 if ! echo "$h" | grep -q '"ok"'; then
   info "health via localhost:$SANDBOX_API_PORT rule failed ($h) - also allowing $SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT"
-  "$SBX" policy allow network "$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT" --sandbox "$SANDBOX_NAME" >/dev/null 2>&1
+  for sb in $CREATED_SANDBOXES; do
+    "$SBX" policy allow network "$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT" --sandbox "$sb" >/dev/null 2>&1
+  done
   h="$(health_from_sandbox)"
 fi
 echo "$h" | grep -q '"ok"' && pass "sandbox reaches $DAEMON_URL_FROM_SANDBOX" \
@@ -236,9 +256,9 @@ curl -sS --max-time 150 -X POST "$DAEMON_URL/mcp" -H "Content-Type: application/
   -H "mcp-session-id: $sid" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"request_network_access\",\"arguments\":{\"host\":\"$TARGET\",\"reason\":\"goversbx e2e test\",\"timeoutSeconds\":$TIMEOUT}}}"
 '
-mcp_request_access() { # $1 = host, $2 = timeoutSeconds
+mcp_request_access() { # $1 = host, $2 = timeoutSeconds, $3 = sandbox (default: the main one)
   "$SBX" exec -e "DAEMON_URL=$DAEMON_URL_FROM_SANDBOX" -e "PLACEHOLDER=$PLACEHOLDER" \
-    -e "TARGET=$1" -e "TIMEOUT=$2" "$SANDBOX_NAME" sh -c "$MCP_CALL_SNIPPET" 2>&1
+    -e "TARGET=$1" -e "TIMEOUT=$2" "${3:-$SANDBOX_NAME}" sh -c "$MCP_CALL_SNIPPET" 2>&1
 }
 
 first="$(mcp_request_access "$TARGET_HOST" 5)"
@@ -266,6 +286,8 @@ if req="$(wait_for_pending "$TARGET_HOST" 45)"; then
   name="$(echo "$req" | jq -r '.sandboxName')"
   if [ "$name" = "$SANDBOX_NAME" ]; then
     pass "pending request arrived with the REAL sandbox name ($name) - proxy substitution works"
+  elif [ "$name" = "$SANDBOX_B" ]; then
+    fail "pending request has sandboxName '$name' (the OTHER test sandbox) - sandbox-scoped secrets with the same placeholder collide; approvals would go to the wrong sandbox"
   else
     fail "pending request has sandboxName '$name', expected '$SANDBOX_NAME'"
   fi
@@ -282,6 +304,35 @@ echo "$second" | grep -q "Approved" && pass "second call returned 'Approved' to 
 code="$(sandbox_status_of "$TARGET_HOST")"
 [ "$code" = 200 ] && pass "$TARGET_HOST now reachable from the sandbox (HTTP 200)" \
   || fail "$TARGET_HOST still not reachable from the sandbox (HTTP $code)"
+
+# ---------------------------------------------------------------------------------------------
+step "4b. Identities stay per sandbox (both sandboxes share the same placeholder)"
+case " $CREATED_SANDBOXES " in
+  *" $SANDBOX_B "*)
+    # $SANDBOX_B was running during the first registration, so it should already be registered;
+    # allow a couple of "please retry" rounds in case it wasn't.
+    out=""
+    for _ in 1 2 3; do
+      out="$(mcp_request_access "$IDENTITY_HOST_B" 1 "$SANDBOX_B")"
+      echo "$out" | grep -q "registering it now" || break
+      sleep 3
+    done
+    if req="$(wait_for_pending "$IDENTITY_HOST_B" 20)"; then
+      name="$(echo "$req" | jq -r '.sandboxName')"
+      if [ "$name" = "$SANDBOX_B" ]; then
+        pass "request from $SANDBOX_B arrived as $SANDBOX_B - the shared placeholder resolves per sandbox"
+      else
+        fail "request from $SANDBOX_B arrived as '$name' - sandbox-scoped secrets with the same placeholder collide"
+      fi
+      curl -sS -o /dev/null -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
+        -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-claude.sh"}'
+      info "denied the check request (no sbx policy change)"
+    else
+      fail "no pending request from $SANDBOX_B for $IDENTITY_HOST_B within 20s (last response: $out)"
+    fi
+    ;;
+  *) info "skipped - second sandbox was not created" ;;
+esac
 
 # ---------------------------------------------------------------------------------------------
 if [ "${SKIP_CLAUDE:-0}" = 1 ]; then

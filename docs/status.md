@@ -3,8 +3,8 @@
 Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-**Next step: run `scripts/e2e-claude.sh` on the sbx host** (see "Automated E2E test" below) - the
-first run of everything against real `sbx`. The manual runbook further down is the fallback for
+**Next step: re-run `scripts/e2e-claude.sh` on the sbx host** (see "Automated E2E test" below)
+after the fixes from its first real run. The manual runbook further down is the fallback for
 debugging. pi/oh-my-pi support exists but is parked until the Claude path works end to end.
 
 ## Automated E2E test
@@ -13,25 +13,41 @@ debugging. pi/oh-my-pi support exists but is parked until the Claude path works 
 scripts/e2e-claude.sh            # on the host; needs sbx, java 21+, curl, jq
 ```
 
-Builds and starts the daemon for real, creates a throwaway Claude sandbox (`sbx create --name
-goversbx-e2e-<ts> claude <tmp workspace>`), lets it reach the daemon, then checks every link with
-PASS/FAIL: placeholder -> "please retry" + registration via `sbx ls`/`sbx secret set-custom` ->
-pending request carrying the **real** sandbox name (i.e. proxy substitution works) -> auto-approve
-via the admin API -> `sbx policy allow` applied and visible in `sbx policy ls` -> host reachable.
-Then the same with real Claude Code (`claude -p ... --allowedTools mcp__goversbx-network`) on a
-second host. Removes the sandbox and stops the daemon at the end. Knobs: `TARGET_HOST`,
+Builds and starts the daemon for real, creates two throwaway Claude sandboxes (`<name>` with a tmp
+workspace, `<name>-b` without), lets them reach the daemon, then checks every link with PASS/FAIL:
+placeholder -> "please retry" + registration via `sbx ls`/`sbx secret set-custom` -> pending request
+carrying the **real** sandbox name (i.e. proxy substitution works) -> auto-approve via the admin
+API -> `sbx policy allow` applied and visible in `sbx policy ls` -> host reachable. Step 4b checks
+that a request from `<name>-b` arrives as `<name>-b`: both sandboxes share the same placeholder,
+and sbx keys custom secrets by placeholder (docker/sbx-releases#230), so this proves sandbox scoping
+keeps them apart. Then the same flow with real Claude Code (`claude -p ... --allowedTools
+mcp__goversbx-network`) on a second host. Registration is limited to the two test sandboxes
+(`GOVERSBX_IDENTITY_SANDBOX_PATTERN`), so the host's other sandboxes are not touched. Removes the
+sandboxes (and, best effort, their secrets) and stops the daemon at the end. Knobs: `TARGET_HOST`,
 `CLAUDE_TARGET_HOST` (default `example.org`/`example.net`, must be blocked beforehand),
 `SKIP_CLAUDE=1`, `KEEP_SANDBOX=1`; logs under `~/.cache/goversbx-e2e/<sandbox>/`.
 
-Already checked from inside a sandbox (no real `sbx` here): the script's mechanics against a stub
-`sbx` that simulates proxy substitution (all steps PASS) and with substitution disabled (fails at
-"no pending request ... placeholder is not being substituted"); the Claude kit install (`claude
-mcp list` -> Connected) and the exact `claude -p` prompt/`--allowedTools` against a local daemon
-(Claude called the tool, request appeared, approved, Claude printed "Approved"). Still assumed from
-sbx docs: the exact `sbx create`/`exec`/`rm --force`/`policy allow --sandbox` syntax - a wrong
-assumption shows up as a FAIL with sbx's own error output. The daemon now logs successful sbx calls
-at INFO (`sbx ls: running sandboxes ...`, `sbx secret set-custom registered ...`, `sbx policy allow
-network ... succeeded`), which the script uses.
+**First real run (2026-10-14, user's macOS host)** got through steps 1-3 - `sbx create`, `sbx exec`,
+`sbx policy allow network localhost:8787 --sandbox`, sandbox -> `host.docker.internal:8787`, the
+proxy env in the sandbox, `sbx ls --format json` all work as assumed - and failed at registration:
+`sbx secret set-custom` has no `--target` flag (`error: unknown flag: --target`); the current flag is
+`--host` (confirmed by a real invocation in docker/sbx-releases#650; `--target` came from an older
+example in #7). Fixed in `SbxCliCustomSecretAdapter`. That run also showed the daemon registering
+*every* running sandbox on the host (`claude-goversbx`, `omp-secret-manager`, ...) - all failed on
+the flag, so nothing changed - which led to the new `GOVERSBX_IDENTITY_SANDBOX_PATTERN` filter.
+
+Checked from inside a sandbox (no real `sbx` here) against the stub `scripts/testing/fake-sbx`,
+which now rejects unknown `set-custom` flags like the real CLI: happy path all PASS with unrelated
+sandboxes present (they get no secret); substitution disabled -> FAIL "no pending request ...
+placeholder is not being substituted"; placeholder-keyed collision simulated -> FAIL "request has
+the OTHER test sandbox's name ... approvals would go to the wrong sandbox". Also checked: the Claude
+kit install (`claude mcp list` -> Connected) and the exact `claude -p` prompt/`--allowedTools`
+against a local daemon. The daemon logs successful sbx calls at INFO, which the script uses.
+
+If step 4b fails for real (secrets collide despite `--sandbox`), the likely fix is a per-sandbox
+placeholder derived from the sandbox name in each kit startup script (e.g.
+`goversbx-ph-$SANDBOX_NAME`), with the daemon recognizing any `goversbx-ph-*` value as unregistered -
+still unforgeable as long as a sandbox-scoped secret only applies to that sandbox's own traffic.
 
 ## What exists
 
@@ -50,9 +66,10 @@ Three bounded contexts under `run.fabian.daemon`, talking only through `*.api` p
   decision) and `check_network_access_status(requestId)`.
 - `sandboxidentity` - reactive sandbox identity: the sandbox always sends the literal header
   `X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1`; when the daemon sees it
-  unsubstituted it runs `sbx ls --format json` and `sbx secret set-custom --sandbox <name> --target
+  unsubstituted it runs `sbx ls --format json` and `sbx secret set-custom --sandbox <name> --host
   <host> --env GOVERSBX_SANDBOX_TOKEN --placeholder <literal> --value <name>` for every unregistered
-  running sandbox and tells the agent to retry. From then on the sbx proxy rewrites the
+  running sandbox matching `GOVERSBX_IDENTITY_SANDBOX_PATTERN` (default: all) and tells the agent
+  to retry. From then on the sbx proxy rewrites the
   placeholder to the real sandbox name.
 
 `sandbox-kit/`: shared `skill/goversbx-network-access/SKILL.md` plus `agents/{claude,pi,omp}/startup.sh`
@@ -67,7 +84,7 @@ Three bounded contexts under `run.fabian.daemon`, talking only through `*.api` p
   propagation into the admin view, reactive-registration retry message.
 - pi script against real pi 1.2.0 (`pi mcp list` connects, header sent verbatim, skill discovered).
 - sbx behavior from primary sources: `secret set-custom` substitutes placeholders in all outbound
-  headers to `--target`, per sandbox, and applies to running sandboxes without restart
+  headers to `--host`, per sandbox, and applies to running sandboxes without restart
   (`docker/sbx-releases` release notes via `gh api`); `sbx ls --format json` shape (user-pasted).
 
 ### Never run for real yet
@@ -124,7 +141,7 @@ becomes reachable from that sandbox.
 | Symptom | Likely cause / what to check |
 |---------|------------------------------|
 | `claude mcp list` shows the server failed | Sandbox can't reach `host.docker.internal:8787`: policy (step 2), daemon bind address, `curl -v http://host.docker.internal:8787/api/health` from the sandbox. |
-| "please retry" on every call, never a pending request | Placeholder isn't being substituted: `--target` doesn't match the host the sandbox calls (must be `host.docker.internal` here), the request bypasses the sbx proxy, or `secret set-custom` failed (daemon log; `sbx secret ls`). To keep testing the rest of the flow, temporarily register the MCP server with the real sandbox name as header value. |
+| "please retry" on every call, never a pending request | Placeholder isn't being substituted: `--host` doesn't match the host the sandbox calls (must be `host.docker.internal` here), the request bypasses the sbx proxy, or `secret set-custom` failed (daemon log; `sbx secret ls`). To keep testing the rest of the flow, temporarily register the MCP server with the real sandbox name as header value. |
 | Request shows sandbox `unknown-sandbox` | Header missing entirely - check the `--header` in `~/.claude.json`. |
 | Approved but host still blocked | `sbx policy allow` output in the UI (`sbxApplied`/`sbxOutput`); check `sbx policy ls`. |
 
