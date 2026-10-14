@@ -10,9 +10,11 @@
 #
 # Setup, once:
 #   - a public tap repo, by default <owner>/homebrew-goversbx (override with the repository
-#     variable HOMEBREW_TAP_REPO), initialised with at least one commit on `main`
-#   - repository secret HOMEBREW_TAP_TOKEN: a fine-grained token with "Contents: read and write"
-#     on the tap repo only
+#     variable HOMEBREW_TAP_REPO); it may be empty, the first release creates `main`
+#   - a deploy key on the tap repo, with "Allow write access":
+#       ssh-keygen -t ed25519 -N "" -C goversbx-release -f tap_deploy_key
+#     tap_deploy_key.pub -> tap repo, Settings > Deploy keys
+#     tap_deploy_key     -> this repo, Settings > Secrets > Actions, as HOMEBREW_TAP_DEPLOY_KEY
 name: release
 
 on:
@@ -59,12 +61,18 @@ jobs:
       - name: Update the Homebrew tap
         if: github.ref_type == 'tag'
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || format('{0}/homebrew-goversbx', github.repository_owner) }}
         run: |
-          [ -n "$TAP_TOKEN" ] || { echo "::error::secret HOMEBREW_TAP_TOKEN is not set"; exit 1; }
+          [ -n "$TAP_DEPLOY_KEY" ] || { echo "::error::secret HOMEBREW_TAP_DEPLOY_KEY is not set"; exit 1; }
+          key="$RUNNER_TEMP/tap_deploy_key"
+          known_hosts="$RUNNER_TEMP/known_hosts"
+          ( umask 077; printf '%s\n' "$TAP_DEPLOY_KEY" > "$key" )
+          # GitHub's published host key (https://api.github.com/meta), pinned instead of ssh-keyscan.
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts -o StrictHostKeyChecking=yes"
           sha="$(cat "build/release/goversbx-$VERSION-darwin-arm64.tar.gz.sha256")"
-          git clone "https://x-access-token:$TAP_TOKEN@github.com/$TAP_REPO.git" tap
+          git clone "git@github.com:$TAP_REPO.git" tap
           mkdir -p tap/Formula
           packaging/homebrew/render-formula.sh "$GITHUB_REPOSITORY" "$VERSION" "$sha" > tap/Formula/goversbx.rb
           cd tap

@@ -32,8 +32,12 @@ strategy), arm64 only.
   real `brew install` yet - Linuxbrew here needs `ghcr.io`, which couldn't be requested because the
   host's goversbx daemon was down at the time.
 - **CI** (`.github/workflows/release.yml`): tag `v*` -> macos-15 runner, setup-graalvm, package +
-  smoke test, GitHub release, push rendered formula to `<owner>/homebrew-goversbx` (secret
-  `HOMEBREW_TAP_TOKEN`). Never run - the repos don't exist on GitHub yet.
+  smoke test, GitHub release, push rendered formula to `fabian-dot-run/homebrew-goversbx` over SSH
+  with a write deploy key on the tap (secret `HOMEBREW_TAP_DEPLOY_KEY`; GitHub's host key pinned,
+  not keyscanned). Checked locally against a bare repo: the first release creates `main` in the
+  empty tap, a re-run with an unchanged formula is a no-op. Never run on GitHub yet. Public repos:
+  `fabian-dot-run/goversbx` (history rewritten before publishing: author `mail@fabian.run`, no
+  Docker username or private git host) and `fabian-dot-run/homebrew-goversbx` (empty).
 - **Not verified at all yet: the macOS build itself.** The first tag push (or a manual
   `workflow_dispatch`) is where the macOS binary gets built and smoke-tested for the first time.
 
