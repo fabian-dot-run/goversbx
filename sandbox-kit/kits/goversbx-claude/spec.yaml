@@ -1,0 +1,76 @@
+schemaVersion: "2"
+kind: mixin
+name: goversbx-claude
+version: "0.1.0"
+displayName: goversbx network access (Claude Code)
+description: >-
+  Lets Claude Code request outbound network access through the goversbx daemon running on the
+  host, with a human approving each host. Registers the daemon's MCP endpoint and installs the
+  goversbx-network-access skill. Does not start the daemon - it must already run on the host.
+
+# Claude-specific: registers with `claude mcp add` and drops the skill into ~/.claude/skills.
+requires:
+  agent: claude
+
+args:
+  daemonHost:
+    default: "host.docker.internal"
+    description: "Hostname under which the sandbox reaches the goversbx daemon on the host"
+    pattern: '^[A-Za-z0-9.-]+$'
+  daemonPort:
+    default: "8787"
+    description: "The daemon's sandbox-facing port (GOVERSBX_SANDBOX_API_PORT)"
+    pattern: '^[0-9]{1,5}$'
+
+permissions:
+  network:
+    allow:
+      # The sbx proxy sees sandbox traffic to host.docker.internal as localhost (verified with
+      # scripts/diagnose-substitution.sh, sbx v0.48.0); the second entry covers a daemonHost that
+      # is not host.docker.internal.
+      - "localhost:${{ kit.args.daemonPort }}"
+      - "${{ kit.args.daemonHost }}:${{ kit.args.daemonPort }}"
+
+setup:
+  install:
+    # Install time, as agent, like the claude kit's own mcp-gateway registration: install commands
+    # finish before the session reads its config, startup commands may not. `claude mcp add` exits
+    # 1 when the entry already exists (recreate via `sbx kit add`), hence `|| true`.
+    #
+    # The header value is a HARDCODED placeholder, the same for every sandbox. The sbx proxy
+    # rewrites it to the real sandbox name once the daemon has registered the sandbox via
+    # `sbx secret set-custom` (reactively, on the first unsubstituted call). It MUST match the
+    # daemon's GOVERSBX_IDENTITY_PLACEHOLDER.
+    - command: |
+        set -e
+        export PATH="$HOME/.local/bin:$HOME/.claude/local:$PATH"
+        claude mcp add goversbx-network "http://${{ kit.args.daemonHost }}:${{ kit.args.daemonPort }}/mcp" \
+          --transport http \
+          --scope user \
+          --header "X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1" || true
+      user: "agent"
+      description: Register the goversbx-network MCP endpoint with claude (install-time, race-free)
+  startup:
+    # Fallback in case the install-time registration could not run. Add-only, never remove-then-add:
+    # the dispatcher may fire while a session is already live.
+    - command:
+        - sh
+        - -c
+        - |
+          export PATH="$HOME/.local/bin:$HOME/.claude/local:$PATH"
+          claude mcp add goversbx-network "http://${{ kit.args.daemonHost }}:${{ kit.args.daemonPort }}/mcp" \
+            --transport http \
+            --scope user \
+            --header "X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1" >/dev/null 2>&1 || true
+      user: "agent"
+      description: Register the goversbx-network MCP endpoint with claude (startup fallback)
+
+agentInstructions:
+  content: |
+    ## Network access via goversbx
+
+    Outbound network access from this sandbox is restricted. If a request is blocked by the sandbox
+    proxy (HTTP 403), or you need a host that is probably not allowed yet, do not give up or retry
+    blindly: call `request_network_access` on the `goversbx-network` MCP server, which asks a human
+    on the host to approve it. Approvals are permanent for this sandbox. The
+    `goversbx-network-access` skill has the details.

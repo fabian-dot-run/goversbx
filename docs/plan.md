@@ -564,3 +564,26 @@ between two sandboxes sharing the placeholder, and the full path with real Claud
 all passed. The only failures were the script's `sbx policy ls | grep` check, which can't work against
 v0.48's summary output; fixed to use `--format json` and treat reachability as the authority. See
 `docs/status.md` for the current state and next steps.
+
+## Revision (2026-10-14): sandbox-kit becomes real sbx kits
+
+Resolves open question 2 / the M4 kit mechanism on paper, based on the kit spec in
+`docker/sbx-kits-contrib` (`spec/SPEC-v2.md`, the `kit-author` skill topics, and the `claude` kit's
+own `spec.yaml` as the reference for MCP registration):
+
+- `sandbox-kit/agents/<agent>/{startup.sh,manifest-fragment.json}` (drafts modeled on
+  `/etc/durable-startup.d`) are replaced by `sandbox-kit/kits/goversbx-{claude,pi,omp}/`, each a
+  `schemaVersion: "2"`, `kind: mixin` kit applied with `sbx create|run --kit` or `sbx kit add`.
+  The manifest fragments are gone: sbx generates the durable-startup entries from `setup.startup`.
+- Claude registers at `setup.install` time as `agent` (race-free, like the `claude` kit's
+  `mcp-gateway`), with an add-only `setup.startup` fallback; pi/omp keep their merge scripts,
+  shipped under `files/home/.local/share/goversbx/` and run from `setup.startup`.
+- The network rule for the daemon moves into the kits (`permissions.network.allow`:
+  `localhost:<port>` and `<daemonHost>:<port>`), parameterized by kit args `daemonHost`/`daemonPort`.
+  The e2e script no longer adds it by hand.
+- Skills ship via `files/home/`. Kits must be self-contained, so each carries a copy of the shared
+  skill, kept in sync by Gradle (`syncKitSkills`, `verifyKitSkills` in `check`).
+- A kit cannot start the daemon: kit hooks run inside the sandbox, the daemon needs the host's
+  `sbx` CLI and must stay outside the sandbox's control.
+
+Not yet run against a real sbx host; see `docs/status.md` for the assumptions the next e2e run checks.

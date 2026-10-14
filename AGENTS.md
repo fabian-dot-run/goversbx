@@ -12,7 +12,7 @@ verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 ./gradlew build                      # build everything, run the full test suite
 ./gradlew :daemon:test               # unit + fast integration tests only
 ./gradlew :daemon:shadowJar          # build the daemon fat jar
-./gradlew :sandbox-kit:packageKit    # build the sandbox customization zip
+./gradlew :sandbox-kit:packageKits   # zip each sbx kit (also: syncKitSkills after editing the skill)
 scripts/e2e-claude.sh                # end-to-end test on a real sbx HOST (not from inside a sandbox)
 scripts/diagnose-substitution.sh     # on the HOST: which `set-custom --host` forms the proxy substitutes
 ```
@@ -100,7 +100,7 @@ per-sandbox, and - this is the important part - **confirmed to apply to already-
 without a restart** (checked directly against `docker/sbx-releases`' GitHub release notes via
 `gh api`, not a search summary). That last point is why registration can be fully reactive:
 
-- Every agent's startup script (`sandbox-kit/agents/<agent>/startup.sh`) sends the same
+- Every agent's kit (`sandbox-kit/kits/goversbx-<agent>/`) sends the same
   **hardcoded literal** (`goversbx-sandbox-identity-placeholder-v1`) as the header value, never
   read from an env var. `claude mcp add --header` resolves its value once, at registration time,
   and freezes it into `~/.claude.json` - a per-sandbox env var that didn't exist yet at that moment
@@ -185,41 +185,56 @@ Central).
 
 ## Sandbox kit
 
-Layout: one shared skill (`sandbox-kit/skill/goversbx-network-access/SKILL.md`) plus one
-directory per agent under `sandbox-kit/agents/<agent>/` (`startup.sh` + `manifest-fragment.json`).
-The daemon is agent-agnostic - anything that speaks MCP over Streamable HTTP and sends the
-placeholder header works - so adding an agent means adding a directory here, not touching
-`daemon/`. `packageKit` bundles `skill/` and `agents/` and marks every `*.sh` executable.
+`sandbox-kit/kits/goversbx-<agent>/` are real sbx **v2 mixin kits** (`spec.yaml` + `files/`, spec:
+`docker/sbx-kits-contrib` `spec/SPEC-v2.md`), applied at create time:
+`sbx create --kit sandbox-kit/kits/goversbx-claude --name N claude <ws>` (or `sbx run --kit ...`,
+`sbx kit add` for an existing sandbox; a git URL or the zips from `packageKits` work too). The
+daemon is agent-agnostic - anything that speaks MCP over Streamable HTTP and sends the placeholder
+header works - so adding an agent means adding a kit here, not touching `daemon/`.
 
-- `agents/claude/` registers via `claude mcp add --transport http --header ...`.
-- `agents/pi/` (pi >= 1.0, MCP in core) merges a `goversbx-network` entry into
-  `~/.pi/agent/mcp.json` with Node, keeping other entries and failing on a malformed file rather
-  than overwriting it. It uses the user-level file because pi only reads a project's `.pi/mcp.json`
-  after the project is trusted, and `"exposure": "direct"` because pi's default (`codemode`)
-  hides MCP tools from the model's tool list. It also copies the skill into `~/.agents/skills/`.
-  The JSON is edited directly instead of calling `pi mcp add`, so the script doesn't need pi on
-  `PATH` or depend on its CLI flags; with pi 1.2.0, `pi mcp add --header ... --exposure direct`
-  writes a byte-identical entry.
-- `agents/omp/` (oh-my-pi) merges a `"type": "http"` entry into `<agentDir>/mcp.json` and copies
-  the skill into `<agentDir>/skills/`. `<agentDir>` is profile-scoped in omp: `~/.omp/agent` by
-  default, `~/.omp/profiles/<name>/agent` under `OMP_PROFILE`/`PI_PROFILE` (omp then ignores the
-  default profile's files), `PI_CODING_AGENT_DIR` overrides the default; `OMP_AGENT_DIR` forces a
-  path. omp's `~/.agents/skills` provider is opt-in for user skills, hence the native skills dir.
-  omp runs on Bun, so the merge uses `node` if present and falls back to `bun`.
+- A kit must be self-contained (`files/` may not point outside it), so each kit carries a **copy**
+  of the shared skill. The source of truth is `sandbox-kit/skill/goversbx-network-access/`; after
+  editing it run `./gradlew :sandbox-kit:syncKitSkills`. `check` fails (`verifyKitSkills`) if a
+  copy has drifted.
+- Every kit declares the same two args, `daemonHost` (default `host.docker.internal`) and
+  `daemonPort` (default `8787`), and allows `localhost:<port>` plus `<daemonHost>:<port>` in
+  `permissions.network.allow` - the sbx proxy matches sandbox traffic to `host.docker.internal`
+  as `localhost`. Override with `--kit-arg goversbx-claude.daemonPort=...`.
+- None of the kits starts the daemon, and none can: kit hooks run inside the sandbox, while the
+  daemon needs the host's `sbx` CLI and is the approval authority the sandbox must not control.
+- `goversbx-claude` (`requires: {agent: claude}`) registers with `claude mcp add --transport http
+  --header ... --scope user || true` at **install** time as `agent` - the same race-free pattern the
+  sbx `claude` kit uses for `mcp-gateway` (startup commands run from a detached dispatcher and can
+  land after the session read its config) - plus an add-only startup fallback. Skill:
+  `files/home/.claude/skills/`.
+- `goversbx-pi` (pi >= 1.0, MCP in core; sbx has no pi agent, so no `requires` - layer it onto
+  e.g. a `shell` sandbox with pi installed) runs `~/.local/share/goversbx/register-pi-mcp.sh` at
+  startup. It merges a `goversbx-network` entry into `~/.pi/agent/mcp.json` with Node, keeping
+  other entries and failing on a malformed file rather than overwriting it. It uses the user-level
+  file because pi only reads a project's `.pi/mcp.json` after the project is trusted, and
+  `"exposure": "direct"` because pi's default (`codemode`) hides MCP tools from the model's tool
+  list. The JSON is edited directly instead of calling `pi mcp add`, so the script doesn't depend
+  on pi's CLI flags; with pi 1.2.0, `pi mcp add --header ... --exposure direct` writes a
+  byte-identical entry. Without `node` it skips (exit 0). Skill: `files/home/.agents/skills/`.
+- `goversbx-omp` (oh-my-pi) runs `~/.local/share/goversbx/register-omp-mcp.sh` at startup: merges a
+  `"type": "http"` entry into `<agentDir>/mcp.json`. `<agentDir>` is profile-scoped in omp:
+  `~/.omp/agent` by default, `~/.omp/profiles/<name>/agent` under `OMP_PROFILE`/`PI_PROFILE` (omp
+  then ignores the default profile's files), `PI_CODING_AGENT_DIR` overrides the default;
+  `OMP_AGENT_DIR` forces a path. The kit ships the skill to `~/.omp/agent/skills/`; under another
+  profile the script copies it there. omp's `~/.agents/skills` provider is opt-in for user skills,
+  hence the native skills dir. omp runs on Bun, so the merge uses `node` if present, falls back to
+  `bun`, and skips with neither.
 - The skill names tools without assuming a prefix: pi exposes them as
   `mcp__goversbx-network__<tool>`, omp as `mcp__goversbx_network_<tool>`.
 - Header values are interpreted by some agents: pi and omp expand `${VAR}` and run `!command`,
   and omp also substitutes a value that is exactly the name of a set env var. Keep the placeholder
   a plain literal that is none of these.
 
-Everything under `agents/` is an explicitly-marked **draft**: it mirrors the in-sandbox
-*consumption* shape observed on a running `sbx` sandbox (durable-startup command format, the
-agents' own MCP config formats), but the host-side mechanism for actually registering a new kit
-with `sbx` has not been confirmed. Don't remove the "DRAFT" markers or treat these files as
-settled without checking against real `sbx` docs first (see `docs/plan.md`, open question 2 /
-milestone M4). The pi and omp scripts' config merging is tested against fresh, existing, and
-malformed configs (plus named profiles and a missing JS runtime for omp). The pi script is also
-verified against real pi 1.2.0 (`pi mcp list` connects and lists both tools as `direct`, the
-placeholder header is sent verbatim, pi's resource loader discovers the skill); the omp script has
-not been run against a real omp installation. Note that pi's exported `loadSkills()` does not scan
+Verification state: the specs parse and resolve their args (checked locally with js-yaml; `sbx kit
+validate` only runs on the host, as step 0 of `scripts/e2e-claude.sh`). The pi and omp scripts'
+config merging is tested against fresh, existing, and malformed configs (plus named profiles and a
+missing JS runtime). The pi merge is verified against real pi 1.2.0 (`pi mcp list` connects and
+lists both tools as `direct`, the placeholder header is sent verbatim, pi's resource loader
+discovers the skill); the omp script has not been run against a real omp installation, and neither
+pi nor omp kit has been applied with real `sbx` yet. Note that pi's exported `loadSkills()` does not scan
 `~/.agents/skills` - use `DefaultResourceLoader` if you ever re-check skill discovery that way.

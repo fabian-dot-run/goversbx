@@ -16,8 +16,20 @@ mkdir -p "$STATE"
 cmd="$1"; shift
 case "$cmd" in
   create)
-    [ "$1" = --name ] && name="$2"
+    # `--kit DIR` is only checked for a spec.yaml; the kit itself (MCP registration, network
+    # allow-list) is not emulated - the daemon is reached on localhost without a policy anyway.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name) name="$2"; shift 2 ;;
+        --kit) [ -f "$2/spec.yaml" ] || { echo "error: no spec.yaml in kit $2"; exit 1; }; shift 2 ;;
+        --kit-arg) shift 2 ;;
+        *) shift ;;
+      esac
+    done
     echo "$name" >> "$STATE/sandboxes"; echo "created $name" ;;
+  kit)
+    [ "$1" = validate ] && [ -f "$2/spec.yaml" ] || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }
+    echo "kit $2 looks valid (fake: only checks for spec.yaml)" ;;
   ls)
     printf '['; first=1
     while read -r n; do [ $first = 1 ] || printf ','; first=0

@@ -1,0 +1,48 @@
+schemaVersion: "2"
+kind: mixin
+name: goversbx-omp
+version: "0.1.0"
+displayName: goversbx network access (oh-my-pi)
+description: >-
+  Lets oh-my-pi (omp) request outbound network access through the goversbx daemon running on the
+  host, with a human approving each host. Merges a goversbx-network entry into the active
+  profile's <agentDir>/mcp.json and installs the goversbx-network-access skill there. sbx has no
+  omp agent, so layer this onto a sandbox where omp is installed (e.g. shell). Does not install
+  omp and does not start the daemon.
+
+args:
+  daemonHost:
+    default: "host.docker.internal"
+    description: "Hostname under which the sandbox reaches the goversbx daemon on the host"
+    pattern: '^[A-Za-z0-9.-]+$'
+  daemonPort:
+    default: "8787"
+    description: "The daemon's sandbox-facing port (GOVERSBX_SANDBOX_API_PORT)"
+    pattern: '^[0-9]{1,5}$'
+
+permissions:
+  network:
+    allow:
+      - "localhost:${{ kit.args.daemonPort }}"
+      - "${{ kit.args.daemonHost }}:${{ kit.args.daemonPort }}"
+
+environment:
+  variables:
+    GOVERSBX_DAEMON_HOST: "${{ kit.args.daemonHost }}"
+    GOVERSBX_DAEMON_PORT: "${{ kit.args.daemonPort }}"
+
+setup:
+  startup:
+    - command: ["sh", "/home/agent/.local/share/goversbx/register-omp-mcp.sh"]
+      user: "agent"
+      description: Register the goversbx-network MCP endpoint in omp's mcp.json and install the skill
+
+agentInstructions:
+  content: |
+    ## Network access via goversbx
+
+    Outbound network access from this sandbox is restricted. If a request is blocked by the sandbox
+    proxy (HTTP 403), or you need a host that is probably not allowed yet, do not give up or retry
+    blindly: call `request_network_access` on the `goversbx-network` MCP server, which asks a human
+    on the host to approve it. Approvals are permanent for this sandbox. The
+    `goversbx-network-access` skill has the details.

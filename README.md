@@ -17,7 +17,7 @@ revisions that moved the MCP server into the daemon and added verified sandbox i
 | Module        | Runs where              | Purpose                                                             |
 |---------------|--------------------------|-----------------------------------------------------------------------|
 | `daemon`      | host, outside sandboxes | Everything: the approval workflow, the MCP endpoint, and sandbox-identity registration, as three bounded contexts (see below) |
-| `sandbox-kit` | packaging only           | Shared `SKILL.md` + one draft durable-startup script per agent (Claude Code, pi, oh-my-pi), bundled into a zip |
+| `sandbox-kit` | inside each sandbox, via sbx | sbx mixin kits (Claude Code, pi, oh-my-pi) that register the daemon's MCP endpoint, allow the sandbox to reach it, and install the skill |
 
 ### Inside `daemon`: bounded contexts, hexagonal layering
 
@@ -105,36 +105,39 @@ claude mcp add goversbx-network "http://localhost:8787/mcp" --transport http \
 Exposes two tools: `request_network_access(host, reason, timeoutSeconds?)` and
 `check_network_access_status(requestId)`.
 
-## Packaging the sandbox kit
+## The sbx kits
+
+`sandbox-kit/kits/` holds one sbx v2 **mixin kit** per agent. Start the daemon on the host first -
+a kit runs inside the sandbox and cannot start it - then create sandboxes with the kit:
 
 ```bash
-./gradlew :sandbox-kit:packageKit
+sbx create --kit sandbox-kit/kits/goversbx-claude --name my-sandbox claude ~/my-project
+# or: sbx run --kit ..., or add it to an existing sandbox: sbx kit add ...
 ```
 
-Produces `sandbox-kit/build/distributions/goversbx-sandbox-kit-*.zip` containing the shared
-`skill/` and one **draft** durable-startup script per agent under `agents/<agent>/`:
+| Kit | Agent | What it does |
+|-----|-------|--------------|
+| `goversbx-claude` | Claude Code (`requires: claude`) | `claude mcp add --transport http --header ...` at install time (+ startup fallback), skill in `~/.claude/skills/` |
+| `goversbx-pi` | pi >= 1.0 | Merges a `goversbx-network` entry (`"exposure": "direct"`) into `~/.pi/agent/mcp.json`, skill in `~/.agents/skills/` |
+| `goversbx-omp` | oh-my-pi | Merges a `"type": "http"` entry into the active profile's `mcp.json`, skill in its `skills/` |
 
-| Agent | What its `startup.sh` does |
-|-------|----------------------------|
-| `claude` (Claude Code) | `claude mcp add --transport http --header ...` |
-| `pi` (pi >= 1.0) | Merges a `goversbx-network` entry (`"exposure": "direct"`) into `~/.pi/agent/mcp.json`, copies the skill to `~/.agents/skills/` |
-| `omp` (oh-my-pi) | Merges a `goversbx-network` entry (`"type": "http"`) into `~/.omp/agent/mcp.json` (or the active profile's agent dir), copies the skill to `<agentDir>/skills/` |
+All three allow the sandbox to reach the daemon (`permissions.network.allow`) and take two kit args,
+`daemonHost` (default `host.docker.internal`) and `daemonPort` (default `8787`), e.g.
+`--kit-arg goversbx-claude.daemonPort=9787`. sbx has no pi/omp agent, so those two kits go on a
+sandbox where the agent is installed (e.g. `shell`).
 
-The daemon doesn't care which agent is calling, so supporting another agent only means adding a
-directory under `sandbox-kit/agents/`. The real host-side mechanism for registering a new `sbx` kit
-still needs to be confirmed (see `docs/plan.md`, open questions).
+The skill's source of truth is `sandbox-kit/skill/`; each kit carries a copy because kits must be
+self-contained. After editing the skill run `./gradlew :sandbox-kit:syncKitSkills` (`check` fails
+on drift). `./gradlew :sandbox-kit:packageKits` writes one zip per kit to
+`sandbox-kit/build/distributions/`.
 
 ## Status
 
 **Current state, the Claude Code MVP test runbook, and open questions: [`docs/status.md`](docs/status.md).**
 End-to-end test against a real sbx host: `scripts/e2e-claude.sh` (run on the host).
 
-**The Claude Code MVP is verified end to end against a real sbx host (2026-10-14).** Milestones M1–M4 from the original plan, plus the revisions that merged the MCP server into the
-daemon and added reactive, verified sandbox identity via `sbx secret set-custom` + `sbx ls`, are
-all implemented and verified: unit tests for the domain/application layers, `javalin-testtools`
-integration tests for the admin REST API, the registration endpoint, and the real MCP HTTP
-endpoint, a fixture-based test for `sbx ls` JSON parsing using the user's real pasted output (29
-tests total, `./gradlew :daemon:test`), plus manual end-to-end curl sessions for the MCP Streamable
-HTTP handshake and the reactive-registration retry path. M5 (wiring the real `sbx policy allow`
-call against a live sandbox, and resolving the host-side kit registration mechanism) is not yet
-done.
+**The Claude Code MVP is verified end to end against a real sbx host (2026-10-14):** reactive
+sandbox identity, proxy substitution, approval -> `sbx policy allow` -> host reachable, identity
+isolation between sandboxes, and real Claude Code calling the tools. Automated: unit tests plus
+`javalin-testtools` integration tests for the admin API, the registration endpoint and the MCP
+endpoint (`./gradlew check`). The sbx kits are new and still waiting for their first host run.

@@ -1,9 +1,9 @@
 #!/bin/sh
-# DRAFT - durable-startup command for the "goversbx" kit on sandboxes running oh-my-pi (omp,
-# can1357/oh-my-pi). Same caveat as the other agents: the host-side kit-registration mechanism is
-# not yet confirmed (docs/plan.md, open question 2). Run as the `agent` user. Assumes the kit is
-# unpacked with the same layout as the packageKit zip (this script at agents/omp/, the shared
-# skill at skill/).
+# setup.startup command of the goversbx-omp kit (sandbox-kit/kits/goversbx-omp/spec.yaml), for
+# oh-my-pi (omp, can1357/oh-my-pi). Runs as the `agent` user on every sandbox start;
+# GOVERSBX_DAEMON_HOST/_PORT come from the kit's environment (kit args). The kit places the skill
+# in the default profile's ~/.omp/agent/skills/ via files/; under another profile this script
+# copies it into that profile's agent dir.
 #
 # Facts from omp's own docs/mcp-config.md and docs/skills.md (+ src/discovery/builtin.ts):
 # - User-level MCP servers live in <agentDir>/mcp.json, skills in <agentDir>/skills/<name>/SKILL.md.
@@ -20,12 +20,12 @@
 #   omp's own native skills directory instead (loaded by default; requires a `description`).
 # - omp ignores a malformed mcp.json with a warning; this script fails instead of overwriting it.
 # - omp is a Bun app, so Node may not exist in an omp sandbox: the merge runs with node if present,
-#   otherwise bun.
+#   otherwise bun. With neither there is no omp to configure, so the script skips instead of failing.
 set -e
 DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-host.docker.internal}"
 DAEMON_PORT="${GOVERSBX_DAEMON_PORT:-8787}"
 SANDBOX_IDENTITY_PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
-KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+DEFAULT_SKILL_DIR="$HOME/.omp/agent/skills/goversbx-network-access"
 
 PROFILE="${OMP_PROFILE:-${PI_PROFILE:-}}"
 if [ -n "${OMP_AGENT_DIR:-}" ]; then
@@ -41,8 +41,8 @@ if command -v node >/dev/null 2>&1; then
 elif command -v bun >/dev/null 2>&1; then
   JS_RUNTIME=bun
 else
-  echo "goversbx: neither node nor bun found, cannot update $AGENT_DIR/mcp.json" >&2
-  exit 1
+  echo "goversbx: neither node nor bun found - omp does not seem to be installed, skipping $AGENT_DIR/mcp.json" >&2
+  exit 0
 fi
 
 mkdir -p "$AGENT_DIR"
@@ -64,6 +64,8 @@ config.mcpServers["goversbx-network"] = {
 fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
 '
 
-mkdir -p "$AGENT_DIR/skills"
-rm -rf "$AGENT_DIR/skills/goversbx-network-access"
-cp -R "$KIT_DIR/skill/goversbx-network-access" "$AGENT_DIR/skills/"
+if [ "$AGENT_DIR/skills/goversbx-network-access" != "$DEFAULT_SKILL_DIR" ] && [ -d "$DEFAULT_SKILL_DIR" ]; then
+  mkdir -p "$AGENT_DIR/skills"
+  rm -rf "$AGENT_DIR/skills/goversbx-network-access"
+  cp -R "$DEFAULT_SKILL_DIR" "$AGENT_DIR/skills/"
+fi

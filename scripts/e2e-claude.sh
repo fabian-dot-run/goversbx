@@ -6,14 +6,16 @@
 #
 # What it does, each step printed as PASS/FAIL:
 #   1. builds the daemon and starts it for real (GOVERSBX_SBX_DRY_RUN=false)
-#   2. creates a throwaway sandbox (`sbx create --name ... claude <tmp workspace>`)
-#   3. allows that sandbox to reach the daemon (`sbx policy allow network localhost:<port> --sandbox ...`)
+#   0. validates the Claude kit (`sbx kit validate sandbox-kit/kits/goversbx-claude`)
+#   2. creates two throwaway sandboxes WITH the kit (`sbx create --kit <kit> --name ... claude <ws>`)
+#   3. checks that the kit's network allow-list lets the sandbox reach the daemon (falls back to an
+#      explicit `sbx policy allow network localhost:<port> --sandbox ...` and reports a FAIL if not)
 #   4. agent side via curl inside the sandbox (same path Claude takes: through the sbx proxy, with the
 #      placeholder header): first call -> "please retry" + reactive registration, second call ->
 #      pending request that must carry the REAL sandbox name -> approved by this script via the
 #      admin API -> the daemon's `sbx policy allow` must have worked -> the host becomes reachable
-#   5. the same with real Claude Code (`claude -p`) after installing the kit's Claude startup script
-#      and skill in the sandbox, on a second host
+#   5. checks what the kit installed (MCP registration, skill), then the same flow with real Claude
+#      Code (`claude -p`) on a second host
 #   6. removes the sandbox and stops the daemon
 #
 # Needs on the host: sbx, java (21+), curl, jq. bash 3.2 compatible (macOS).
@@ -52,6 +54,10 @@ CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx-claude"
+KIT_ARGS=""
+# The kit defaults to port 8787; only pass --kit-arg when the daemon runs elsewhere.
+[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx-claude.daemonPort=$SANDBOX_API_PORT"
 RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
@@ -163,6 +169,12 @@ for port in "$SANDBOX_API_PORT" "$ADMIN_PORT"; do
 done
 pass "sbx, java, curl, jq present; ports $SANDBOX_API_PORT/$ADMIN_PORT free"
 info "sandbox: $SANDBOX_NAME, run dir: $RUN_DIR"
+if out="$("$SBX" kit validate "$KIT_DIR" 2>&1)"; then
+  pass "sbx kit validate $KIT_DIR"
+  [ -n "$out" ] && info "$out"
+else
+  echo "$out"; die "sbx kit validate $KIT_DIR failed"
+fi
 
 # ---------------------------------------------------------------------------------------------
 step "1. Build and start the daemon (real sbx calls)"
@@ -187,18 +199,20 @@ info "sandbox identity registration limited to $SANDBOX_NAME and $SANDBOX_B - ot
 
 # ---------------------------------------------------------------------------------------------
 step "2. Create throwaway sandboxes"
-cp -R "$REPO_DIR/sandbox-kit/skill" "$REPO_DIR/sandbox-kit/agents" "$WORKSPACE/"
-if out="$("$SBX" create --name "$SANDBOX_NAME" claude "$WORKSPACE" 2>&1)"; then
+# shellcheck disable=SC2086 # KIT_ARGS is deliberately word-split
+if out="$("$SBX" create --kit "$KIT_DIR" $KIT_ARGS --name "$SANDBOX_NAME" claude "$WORKSPACE" 2>&1)"; then
   CREATED_SANDBOXES="$SANDBOX_NAME"
-  pass "sbx create --name $SANDBOX_NAME claude $WORKSPACE"
+  pass "sbx create --kit $KIT_DIR $KIT_ARGS --name $SANDBOX_NAME claude $WORKSPACE"
+  echo "$out" | grep -i -E "warn|kit" | while IFS= read -r l; do info "$l"; done
 else
   echo "$out"; die "sbx create failed"
 fi
-# Second sandbox (no workspace): created now so the first reactive registration covers both, which
-# is what can reveal identities colliding (both share the same placeholder).
-if out="$("$SBX" create --name "$SANDBOX_B" claude 2>&1)"; then
+# Second sandbox (no workspace, same kit): created now so the first reactive registration covers
+# both, which is what can reveal identities colliding (both share the same placeholder).
+# shellcheck disable=SC2086
+if out="$("$SBX" create --kit "$KIT_DIR" $KIT_ARGS --name "$SANDBOX_B" claude 2>&1)"; then
   CREATED_SANDBOXES="$CREATED_SANDBOXES $SANDBOX_B"
-  pass "sbx create --name $SANDBOX_B claude (second sandbox, for the identity-isolation check)"
+  pass "sbx create --kit ... --name $SANDBOX_B claude (second sandbox, for the identity-isolation check)"
 else
   fail "sbx create --name $SANDBOX_B claude failed - identity-isolation check will be skipped: $out"
 fi
@@ -211,25 +225,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
-step "3. Let the sandbox reach the daemon"
+step "3. The kit's network allow-list lets the sandbox reach the daemon"
 health_from_sandbox() { in_sandbox 'curl -sS --max-time 10 "$DAEMON_URL/api/health" 2>&1'; }
-for sb in $CREATED_SANDBOXES; do
-  if out="$("$SBX" policy allow network "localhost:$SANDBOX_API_PORT" --sandbox "$sb" 2>&1)"; then
-    pass "sbx policy allow network localhost:$SANDBOX_API_PORT --sandbox $sb"
-  else
-    fail "sbx policy allow network localhost:$SANDBOX_API_PORT --sandbox $sb failed: $out"
-  fi
-done
 h="$(health_from_sandbox)"
-if ! echo "$h" | grep -q '"ok"'; then
-  info "health via localhost:$SANDBOX_API_PORT rule failed ($h) - also allowing $SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT"
+if echo "$h" | grep -q '"ok"'; then
+  pass "sandbox reaches $DAEMON_URL_FROM_SANDBOX through the kit's permissions.network.allow"
+else
+  fail "kit's network allow-list did not let the sandbox reach the daemon ($h) - falling back to explicit policy rules to test the rest"
   for sb in $CREATED_SANDBOXES; do
+    "$SBX" policy allow network "localhost:$SANDBOX_API_PORT" --sandbox "$sb" >/dev/null 2>&1
     "$SBX" policy allow network "$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT" --sandbox "$sb" >/dev/null 2>&1
   done
   h="$(health_from_sandbox)"
+  echo "$h" | grep -q '"ok"' && info "reachable with explicit sbx policy allow network localhost:$SANDBOX_API_PORT" \
+    || die "sandbox cannot reach $DAEMON_URL_FROM_SANDBOX/api/health even with explicit rules: $h"
 fi
-echo "$h" | grep -q '"ok"' && pass "sandbox reaches $DAEMON_URL_FROM_SANDBOX" \
-  || die "sandbox cannot reach $DAEMON_URL_FROM_SANDBOX/api/health: $h"
 # Header substitution only happens if the request goes through the sbx proxy.
 info "$(in_sandbox 'echo "proxy in sandbox: ${HTTP_PROXY:-${http_proxy:-<unset>}}, NO_PROXY=${NO_PROXY:-${no_proxy:-<unset>}}"')"
 
@@ -347,15 +357,22 @@ else
     fail "$CLAUDE_TARGET_HOST is already reachable - pick a blocked host with CLAUDE_TARGET_HOST=..."
   else
     pass "$CLAUDE_TARGET_HOST is blocked before the test (HTTP $code)"
-    if out="$("$SBX" exec -e "GOVERSBX_DAEMON_HOST=$SANDBOX_DAEMON_HOST" -e "GOVERSBX_DAEMON_PORT=$SANDBOX_API_PORT" \
-         -e "WORKSPACE=$WORKSPACE" "$SANDBOX_NAME" bash -lc \
-         'sh "$WORKSPACE/agents/claude/startup.sh" && mkdir -p ~/.claude/skills && cp -R "$WORKSPACE/skill/goversbx-network-access" ~/.claude/skills/ && claude mcp list' 2>&1)" \
-       && echo "$out" | grep -q "goversbx-network"; then
-      pass "kit installed in the sandbox (claude mcp list shows goversbx-network)"
+    # Nothing installed by hand any more - all of this must come from `sbx create --kit`.
+    out="$("$SBX" exec "$SANDBOX_NAME" bash -lc 'claude mcp list' 2>&1)"
+    if echo "$out" | grep -q "goversbx-network"; then
+      pass "kit registered the MCP endpoint (claude mcp list shows goversbx-network)"
       info "$(echo "$out" | grep goversbx-network)"
     else
-      fail "installing the Claude kit failed: $out"
+      fail "kit did not register goversbx-network with claude: $out"
     fi
+    if "$SBX" exec "$SANDBOX_NAME" test -f /home/agent/.claude/skills/goversbx-network-access/SKILL.md; then
+      pass "kit installed the skill at ~/.claude/skills/goversbx-network-access/SKILL.md"
+    else
+      fail "skill missing at ~/.claude/skills/goversbx-network-access/SKILL.md"
+    fi
+    out="$("$SBX" exec "$SANDBOX_NAME" sh -c 'grep -rl "goversbx" /home/agent "$WORKSPACE_DIR" --include="*.md" 2>/dev/null | grep -v /skills/ | head -5' 2>&1)"
+    [ -n "$out" ] && info "kit agent instructions found in: $(echo $out)" \
+      || info "no kit agent-instructions file found (optional - the skill is what Claude uses)"
 
     PROMPT="Use the request_network_access tool of the goversbx-network MCP server to request network access to $CLAUDE_TARGET_HOST with the reason 'goversbx e2e test' and timeoutSeconds 90. If it says the sandbox identity is not registered yet, wait a few seconds and call it again with the same arguments. Do nothing else. Finally print the tool's last response verbatim."
     "$SBX" exec -e "PROMPT=$PROMPT" "$SANDBOX_NAME" bash -lc \
