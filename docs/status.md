@@ -68,6 +68,15 @@ agent to stop after ~3 tries and point the user at the daemon log; `scripts/gove
 the running daemon is older than the code. (Encouraging side note: in that session Claude did reach
 for goversbx on its own.)
 
+**Notifications (2026-10-14):** the admin UI subscribes to `GET /api/events` (SSE: `ready`,
+`created`, `decided`) and, once the user enables notifications, shows one browser notification per
+new request with Approve/Deny actions from a service worker (`sw.js`); notifications close when the
+request is decided elsewhere. The daemon side is a listener API in `networkaccess.api`
+(`NetworkAccessListener`, `NetworkAccessService.subscribe`) - the hook for later channels (native
+macOS, Telegram). Verified: unit + SSE integration tests, and a curl run against the real daemon
+(MCP call -> `created` -> approve -> `decided`, tool returned "Approved"). Not yet verified in a real
+browser (a headless Firefox download here needs approval for `cdn.playwright.dev`).
+
 **Next steps**: restart the daemon (`scripts/goversbx stop && scripts/goversbx start`), then rerun
 `scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their
 kits exist, never applied with real sbx); then the out-of-scope items (persistence, revocation, admin authn).

@@ -79,3 +79,33 @@ button:hover {
   background: #ffebe9;
   color: #82071e;
 }
+
+.live {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.6rem;
+  margin-left: 0.5rem;
+}
+
+.live-on {
+  background: #e3f5e6;
+  color: #1d6b2c;
+}
+
+.live-off {
+  background: #f3f3f3;
+  color: #888;
+}
+
+.notify {
+  color: #444;
+  font-size: 0.9rem;
+}
+
+.notify button {
+  margin-left: 0.5rem;
+}
+
+tr.highlight td {
+  background: #fff7d6;
+}

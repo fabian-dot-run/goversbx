@@ -79,7 +79,11 @@ Two HTTP listeners start:
   what sandboxes reach via the always-allow-listed hostname - there is nothing else to install
   inside a sandbox.
 - **Admin UI + API** — `127.0.0.1:8788` only (`GOVERSBX_ADMIN_PORT`), never exposed to a
-  sandbox. Open it in a browser to approve/deny pending requests.
+  sandbox. Open it in a browser to approve/deny pending requests. It updates live (server-sent
+  events, `GET /api/events`), and after "Enable notifications" it raises a browser notification
+  for every new request with Approve/Deny buttons (via a service worker; buttons need Firefox 152+
+  or Chrome - otherwise clicking the notification opens the request). Keep a tab open; on macOS the
+  browser itself must be allowed to send notifications (System Settings > Notifications).
 
 By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals and sandbox-identity registration log what
 they *would* run without calling `sbx`. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't

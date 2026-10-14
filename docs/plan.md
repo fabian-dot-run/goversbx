@@ -624,3 +624,16 @@ its sandbox-scoped secret but was never registered again - the agent got "please
 `SbxSandboxListPort` now returns `RunningSandbox(name, id)` from `sbx ls --format json`, and the
 service keys registrations by both. The manual admin `register(name)` no longer marks anything (it
 doesn't know the incarnation); at worst the next reactive pass registers once more.
+
+## Revision (2026-10-14): browser notifications
+
+Wanted: be told about new requests and answer them from the notification. Options considered:
+browser notifications from the admin UI, native macOS notifications with buttons (e.g. `alerter`),
+and phone channels (a Telegram bot works outbound-only; ntfy/Pushover buttons would need the admin
+API reachable from outside). Built first: browser notifications, since they need no dependency and
+the user runs Firefox (notification `actions` since Firefox 152, per MDN compat data).
+`networkaccess.api.NetworkAccessListener` + `NetworkAccessService.subscribe()` publish
+created/decided events; `AdminEventStream` serves them as SSE on the loopback admin port; the UI
+replaces 2 s polling with the stream (15 s fallback poll) and lets a service worker own the
+notifications, tagged by request id. Other channels can subscribe to the same listener later, in a
+`notification` context of their own.

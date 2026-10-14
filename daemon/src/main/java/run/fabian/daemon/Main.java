@@ -4,6 +4,7 @@ import run.fabian.daemon.mcp.McpContext;
 import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestRepository;
 import run.fabian.daemon.networkaccess.adapter.sbx.SbxCliPolicyAdapter;
 import run.fabian.daemon.networkaccess.adapter.web.AdminApiController;
+import run.fabian.daemon.networkaccess.adapter.web.AdminEventStream;
 import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
@@ -66,6 +67,7 @@ public final class Main {
             config.staticFiles.add("/public");
         });
         new AdminApiController(networkAccessService).registerRoutes(adminApp);
+        new AdminEventStream(networkAccessService).registerRoutes(adminApp);
         new SandboxIdentityController(sandboxIdentityService).registerRoutes(adminApp);
         adminApp.start("127.0.0.1", adminPort);
         log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only)", adminPort);

@@ -2,6 +2,7 @@ package run.fabian.daemon.networkaccess.application;
 
 import org.junit.jupiter.api.Test;
 import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestRepository;
+import run.fabian.daemon.networkaccess.api.NetworkAccessListener;
 import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
 import run.fabian.daemon.networkaccess.api.RequestStatus;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
@@ -114,5 +115,50 @@ class NetworkAccessServiceTest {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new RecordingSbxPolicyPort());
 
         assertFalse(service.getStatus(UUID.randomUUID()).isPresent());
+    }
+
+    @Test
+    void publishesCreatedAndDecidedEventsUntilUnsubscribed() {
+        NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new RecordingSbxPolicyPort());
+        List<String> events = new CopyOnWriteArrayList<>();
+        Runnable unsubscribe = service.subscribe(new NetworkAccessListener() {
+            @Override
+            public void requestCreated(NetworkAccessRequestView request) {
+                events.add("created " + request.host() + " " + request.status());
+            }
+
+            @Override
+            public void requestDecided(NetworkAccessRequestView request) {
+                events.add("decided " + request.host() + " " + request.status());
+            }
+        });
+
+        NetworkAccessRequestView first = service.createRequest("sandbox-1", "a.example.com", "reason");
+        service.approve(first.id(), "fabian");
+        unsubscribe.run();
+        service.createRequest("sandbox-1", "b.example.com", "reason");
+
+        assertEquals(List.of("created a.example.com PENDING", "decided a.example.com APPROVED"), events);
+    }
+
+    @Test
+    void aFailingListenerDoesNotBreakTheUseCase() {
+        NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new RecordingSbxPolicyPort());
+        service.subscribe(new NetworkAccessListener() {
+            @Override
+            public void requestCreated(NetworkAccessRequestView request) {
+                throw new IllegalStateException("broken listener");
+            }
+
+            @Override
+            public void requestDecided(NetworkAccessRequestView request) {
+                throw new IllegalStateException("broken listener");
+            }
+        });
+
+        NetworkAccessRequestView created = service.createRequest("sandbox-1", "a.example.com", "reason");
+        NetworkAccessRequestView denied = service.deny(created.id(), "fabian");
+
+        assertEquals(RequestStatus.DENIED, denied.status());
     }
 }

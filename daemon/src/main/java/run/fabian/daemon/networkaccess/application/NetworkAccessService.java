@@ -1,11 +1,14 @@
 package run.fabian.daemon.networkaccess.application;
 
 import run.fabian.daemon.networkaccess.api.NetworkAccessApi;
+import run.fabian.daemon.networkaccess.api.NetworkAccessListener;
 import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
 import run.fabian.daemon.networkaccess.api.RequestStatus;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
 import run.fabian.daemon.networkaccess.domain.NetworkAccessRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -14,6 +17,8 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 /**
  * Application service for the {@code networkaccess} bounded context. Implements
@@ -22,8 +27,11 @@ import java.util.UUID;
  */
 public final class NetworkAccessService implements NetworkAccessApi {
 
+    private static final Logger log = LoggerFactory.getLogger(NetworkAccessService.class);
+
     private final RequestRepository repository;
     private final SbxPolicyPort sbxPolicyPort;
+    private final List<NetworkAccessListener> listeners = new CopyOnWriteArrayList<>();
 
     public NetworkAccessService(RequestRepository repository, SbxPolicyPort sbxPolicyPort) {
         this.repository = repository;
@@ -34,7 +42,9 @@ public final class NetworkAccessService implements NetworkAccessApi {
     public NetworkAccessRequestView createRequest(String sandboxName, String host, String reason) {
         NetworkAccessRequest request = new NetworkAccessRequest(UUID.randomUUID(), sandboxName, host, reason, Instant.now());
         repository.add(request);
-        return NetworkAccessRequestView.from(request);
+        NetworkAccessRequestView view = NetworkAccessRequestView.from(request);
+        publish(listener -> listener.requestCreated(view));
+        return view;
     }
 
     @Override
@@ -60,15 +70,36 @@ public final class NetworkAccessService implements NetworkAccessApi {
         NetworkAccessRequest request = requireRequest(requestId);
         SbxPolicyPort.Result result = sbxPolicyPort.allowNetwork(request.getSandboxName(), request.getHost());
         request.approve(decidedBy, result.applied(), result.output());
-        repository.notifyDecided(requestId);
-        return NetworkAccessRequestView.from(request);
+        return decided(request);
     }
 
     public NetworkAccessRequestView deny(UUID requestId, String decidedBy) {
         NetworkAccessRequest request = requireRequest(requestId);
         request.deny(decidedBy);
-        repository.notifyDecided(requestId);
-        return NetworkAccessRequestView.from(request);
+        return decided(request);
+    }
+
+    /** Registers a listener for request lifecycle events; the returned handle removes it again. */
+    public Runnable subscribe(NetworkAccessListener listener) {
+        listeners.add(listener);
+        return () -> listeners.remove(listener);
+    }
+
+    private NetworkAccessRequestView decided(NetworkAccessRequest request) {
+        repository.notifyDecided(request.getId());
+        NetworkAccessRequestView view = NetworkAccessRequestView.from(request);
+        publish(listener -> listener.requestDecided(view));
+        return view;
+    }
+
+    private void publish(Consumer<NetworkAccessListener> event) {
+        for (NetworkAccessListener listener : listeners) {
+            try {
+                event.accept(listener);
+            } catch (RuntimeException e) {
+                log.warn("Network-access listener failed", e);
+            }
+        }
     }
 
     private NetworkAccessRequest requireRequest(UUID requestId) {
