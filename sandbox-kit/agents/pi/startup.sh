@@ -7,10 +7,12 @@
 #
 # Two steps:
 # 1. Add a "goversbx-network" entry to pi's user-level MCP config (~/.pi/agent/mcp.json), keeping
-#    every other entry. `pi mcp add` has no --header flag, so the JSON is edited directly. The
-#    user-level file is used on purpose: pi only reads a project's .pi/mcp.json after the project
-#    is explicitly trusted. A malformed existing file makes this fail loudly instead of being
-#    overwritten.
+#    every other entry. The JSON is edited directly rather than via `pi mcp add`, so this works
+#    without pi on PATH and without depending on its CLI flags (pi 1.2.0 does have --header and
+#    --exposure; `pi mcp add ... --header ... --exposure direct --description ...` writes an entry
+#    byte-identical to this one, verified). The user-level file is used on purpose: pi only reads
+#    a project's .pi/mcp.json after the project is explicitly trusted. A malformed existing file
+#    makes this fail loudly instead of being overwritten.
 #    - The header value is the same hardcoded placeholder literal as for every other agent - the
 #      sbx proxy rewrites it to the real sandbox name (docs/plan.md, "reactive registration"). It
 #      MUST match the daemon's GOVERSBX_IDENTITY_PLACEHOLDER, and must never contain `${` or start

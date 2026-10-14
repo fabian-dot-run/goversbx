@@ -176,7 +176,9 @@ placeholder header works - so adding an agent means adding a directory here, not
   than overwriting it. It uses the user-level file because pi only reads a project's `.pi/mcp.json`
   after the project is trusted, and `"exposure": "direct"` because pi's default (`codemode`)
   hides MCP tools from the model's tool list. It also copies the skill into `~/.agents/skills/`.
-  `pi mcp add` has no `--header` flag, which is why the JSON is edited directly.
+  The JSON is edited directly instead of calling `pi mcp add`, so the script doesn't need pi on
+  `PATH` or depend on its CLI flags; with pi 1.2.0, `pi mcp add --header ... --exposure direct`
+  writes a byte-identical entry.
 - `agents/omp/` (oh-my-pi) merges a `"type": "http"` entry into `<agentDir>/mcp.json` and copies
   the skill into `<agentDir>/skills/`. `<agentDir>` is profile-scoped in omp: `~/.omp/agent` by
   default, `~/.omp/profiles/<name>/agent` under `OMP_PROFILE`/`PI_PROFILE` (omp then ignores the
@@ -195,5 +197,8 @@ agents' own MCP config formats), but the host-side mechanism for actually regist
 with `sbx` has not been confirmed. Don't remove the "DRAFT" markers or treat these files as
 settled without checking against real `sbx` docs first (see `docs/plan.md`, open question 2 /
 milestone M4). The pi and omp scripts' config merging is tested against fresh, existing, and
-malformed configs (plus named profiles and a missing JS runtime for omp), but neither has been run
-against a real pi/omp installation.
+malformed configs (plus named profiles and a missing JS runtime for omp). The pi script is also
+verified against real pi 1.2.0 (`pi mcp list` connects and lists both tools as `direct`, the
+placeholder header is sent verbatim, pi's resource loader discovers the skill); the omp script has
+not been run against a real omp installation. Note that pi's exported `loadSkills()` does not scan
+`~/.agents/skills` - use `DefaultResourceLoader` if you ever re-check skill discovery that way.

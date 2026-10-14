@@ -454,7 +454,8 @@ of which process sent the request. Only `sandbox-kit` was Claude-specific (`clau
 - `agents/pi/startup.sh`: pi supports MCP in core since 1.0 (2026-10-01). Facts taken from pi's own
   `packages/coding-agent/docs/mcp.md` (fetched via `gh api`): user-level servers live in
   `~/.pi/agent/mcp.json` under `mcpServers`, HTTP servers take `url` + `headers`; header values
-  interpolate `${VAR}` and run `!command`; `pi mcp add` has no `--header` flag; a project's
+  interpolate `${VAR}` and run `!command`; the docs don't mention a `--header` flag for
+  `pi mcp add` (pi 1.2.0 turned out to have one - see "Verified against real pi" below); a project's
   `.pi/mcp.json` is only read once the project is trusted; tools default to `codemode` exposure
   (callable from scripts, not declared to the model), `direct` declares them like built-ins; pi
   also scans `~/.agents/skills/` (from pi's `docs/skills.md`). The script therefore merges a
@@ -466,9 +467,26 @@ of which process sent the request. Only `sandbox-kit` was Claude-specific (`clau
   `mcp__goversbx-network__<tool>`) instead of assuming bare names.
 
 Verification: the pi script was run against a fresh home, an existing config with another server
-(preserved, and idempotent on a second run), and a malformed config (exit 1, file untouched). It
-was **not** run against a real pi installation: `registry.npmjs.org` is blocked from this sandbox,
-so `pi mcp list` couldn't confirm pi accepts the generated entry.
+(preserved, and idempotent on a second run), and a malformed config (exit 1, file untouched).
+
+**Verified against real pi** (`@earendil-works/pi-coding-agent@1.2.0`, installed into a scratch
+prefix once `registry.npmjs.org` was approved), with the daemon running locally:
+
+- `pi mcp list` on the generated config: `goversbx-network: connected, 2 tools (direct, global)`,
+  tools `request_network_access` and `check_network_access_status`, no errors.
+- pi sends the header verbatim: pointed at a header-logging listener, the initialize POST carried
+  `X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1`.
+- `pi mcp add goversbx-network --url ... --header X-Goversbx-Sandbox-Name=... --exposure direct
+  --description ...` writes a byte-identical entry, so the script's format is exactly pi's own. The
+  script still edits the JSON directly so it doesn't need pi on `PATH` or depend on CLI flags the
+  docs don't mention.
+- Skill discovery: pi's `DefaultResourceLoader` (what sessions use) finds
+  `goversbx-network-access` in `~/.agents/skills/` with no diagnostics. pi's exported
+  `loadSkills()` alone does *not* - it only scans `~/.pi/agent/skills`; `~/.agents/skills` is added
+  by the package manager (`dist/core/package-manager.js`), unconditionally and without trust gating
+  for the user-level directory.
+
+Not verified: an actual tool call from a pi session (needs model credentials).
 
 Sources: [earendil-works/pi `docs/mcp.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md),
 pi `docs/skills.md`, [docker/sbx-kits-contrib `pi` kit](https://github.com/docker/sbx-kits-contrib/tree/main/pi).
