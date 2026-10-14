@@ -191,6 +191,13 @@ sandbox, just the bare command).
   of `node -e`, skipping gracefully if `jq` is absent. Verified locally: merges into an empty
   config, preserves an existing unrelated `mcp` entry and other top-level keys, and fails loudly
   (doesn't overwrite) on malformed JSON.
+  - **First real run found a schema bug**: `sbx kit validate` failed with `cannot unmarshal !!seq
+    into string`. `setup.install[].command` MUST be a **string** (`sh -c <string>`, shell
+    metacharacters work) while `setup.startup[].command` MUST be a **list<string>** (exec-style
+    argv) - this kit had the pi/omp kits' list form in its `install` entry too (`docker/
+    sbx-kits-contrib` `spec/SPEC-v2.md` §5.6, confirmed via `gh api`; the claude kit's install
+    commands already used the (correct) string form, which is why only this new kit hit it - pi/omp
+    only ever use `startup`). Fixed.
 - `scripts/e2e-pi.sh`, `scripts/e2e-omp.sh`, `scripts/e2e-opencode.sh` (new): same shape as
   `e2e-claude.sh` (daemon, two throwaway sandboxes, curl-driven MCP identity/approval flow, 4b
   identity-isolation check), with per-agent differences only in sandbox creation and step 5 (real

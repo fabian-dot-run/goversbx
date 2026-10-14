@@ -42,7 +42,9 @@ setup:
     # Install time, like the claude kit: finishes before the session reads its config, where a
     # startup command might not (race with the detached dispatcher). Idempotent (rewrites only our
     # own `mcp.goversbx-network` entry), so a startup fallback below is safe to also run.
-    - command: ["sh", "/home/agent/.local/share/goversbx/register-opencode-mcp.sh"]
+    # install[].command MUST be a string (sh -c <string>) - a list is a schema error here, unlike
+    # startup[].command which MUST be a list (docker/sbx-kits-contrib spec/SPEC-v2.md, 5.6).
+    - command: "sh /home/agent/.local/share/goversbx/register-opencode-mcp.sh"
       user: "agent"
       description: Register the goversbx-network MCP endpoint in opencode's config (install-time, race-free)
   startup:
