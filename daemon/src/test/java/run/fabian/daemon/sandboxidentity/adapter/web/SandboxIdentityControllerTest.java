@@ -12,6 +12,8 @@ import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
 import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
 import run.fabian.daemon.sandboxidentity.application.SandboxRegistrationResult;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,7 +28,7 @@ class SandboxIdentityControllerTest {
     @Test
     void registeringASandboxReturnsTheDryRunOutput() throws Exception {
         SandboxIdentityService service = new SandboxIdentityService(
-                new SbxCliCustomSecretAdapter("sbx", true),
+                new SbxCliCustomSecretAdapter("sbx", true), List::of,
                 "daemon.internal", "GOVERSBX_SANDBOX_TOKEN", "the-placeholder");
 
         JavalinTest.test(newApp(service), (server, client) -> {

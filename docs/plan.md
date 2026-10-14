@@ -347,7 +347,9 @@ happen outside this repo: an operator (or future provisioning automation) must c
 *before* that sandbox's kit-install step runs, since `$GOVERSBX_SANDBOX_TOKEN` only exists once
 that registration has happened - this ordering requirement is not yet automated end-to-end, and
 doing so would need to be wired into however sandboxes actually get created (still part of open
-question 2, the host-side kit-authoring mechanism). One other real `sbx` caveat worth watching,
+question 2, the host-side kit-authoring mechanism). **This ordering requirement itself is removed
+by the next revision below** - left here as the historical record of what this revision actually
+shipped, not as current guidance. One other real `sbx` caveat worth watching,
 found in the same research: a separate GitHub issue documented that the placeholder can get
 base64-encoded by some HTTP clients before reaching the proxy, breaking substitution for `Basic`
 auth specifically - does not apply to our plain custom header, but worth re-checking if this
@@ -364,3 +366,78 @@ Sources consulted: [`sbx secret set-custom`](https://docs.docker.com/reference/c
 [Manage credentials](https://docs.docker.com/ai/sandboxes/configuration/credentials/),
 [Support custom secrets / environment variables passed into sandboxes (docker/sbx-releases#7)](https://github.com/docker/sbx-releases/issues/7),
 [docker/sbx-kits-contrib `claude` kit](https://github.com/docker/sbx-kits-contrib/tree/main/claude).
+
+## Revision (2026-10-14, continued again): reactive registration - no pre-sandbox-start step needed
+
+The user pushed back on the "register before kit-install" ordering requirement as inconvenient and
+asked whether the daemon could instead poll `sbx` and register new sandboxes automatically. Two
+things, checked rather than assumed, make a better design than periodic polling possible:
+
+- **`sbx` is not actually open source in the sense of publishing application code** - checked by
+  listing `docker/sbx-releases`' repo contents directly via `gh api`: it contains only `LICENSE`,
+  `README.md`, `SECURITY.md` (25 KB total), no source. "Open source" apparently meant the release
+  notes/issue tracker are public, not the CLI/daemon implementation - worth remembering before
+  citing "the source" for this project again.
+- **Secret registration already applies to already-running sandboxes without a restart** -
+  confirmed via `gh api repos/docker/sbx-releases/releases` directly (not just a search-engine
+  summary): "Adding, updating, or removing global service secrets now updates existing local
+  sandboxes without a restart... Sandbox-scoped command and reference secrets also take effect
+  immediately." Combined with bulk secret removal also being described as affecting running
+  sandboxes elsewhere in the same release history, there's no indication the simple static
+  `--value` case is excluded from this live-update behavior.
+- **`sbx ls --format json`** (real output shape confirmed by the user pasting a genuine excerpt,
+  not guessed) lists every sandbox as a flat JSON array (not wrapped in `{"sandboxes": [...]}`,
+  per sbx's own v0.48.0 changelog) with snake_case fields: `name`, `id`, `agent`, `status`,
+  `last_used_at`, `workspaces` (array), `created_at`.
+
+This enables a strictly better design than both "register before start" and "poll periodically":
+**reactive, on-demand registration, triggered by the daemon itself seeing the problem.**
+
+- `sandbox-kit/startup/000-cmd.sh`'s `--header` value is now a **hardcoded literal**
+  (`goversbx-sandbox-identity-placeholder-v1`), not an env-var lookup. This matters because
+  `claude mcp add --header` resolves its value once, at registration time, and freezes it into
+  `~/.claude.json` - if it read a per-sandbox env var that didn't exist yet (because registration
+  hadn't happened), that would be baked in as empty forever, regardless of any later registration.
+  A hardcoded literal sidesteps this entirely: the daemon-side substitution can happen at any time,
+  live, independent of when this script ran.
+- `sandboxidentity` gains a published `api` package (`SandboxIdentityApi`) and a new driven port
+  (`SbxSandboxListPort`, implemented by `adapter.sbx.SbxCliSandboxListAdapter` around `sbx ls`).
+  `SandboxIdentityService.isUnsubstitutedPlaceholder(headerValue)` checks whether an incoming
+  request's sandbox-name header still equals the raw placeholder (meaning: not substituted yet,
+  meaning: this sandbox isn't registered). `registerAnyUnregisteredSandboxes()` then calls `sbx ls`
+  and registers every running sandbox this daemon-process doesn't yet have in its own in-memory
+  `registered` set (a failed registration is *not* added to that set, so it's retried next time).
+- `mcp.tool.RequestNetworkAccessTool` now takes a `SandboxIdentityApi` too (making `mcp` depend on
+  a second bounded context's published API, same rule as before - never `sandboxidentity.domain`/
+  `.application`/`.adapter` directly). Before doing anything else, it checks
+  `isUnsubstitutedPlaceholder(sandboxName)`; if true, it calls
+  `registerAnyUnregisteredSandboxes()` and returns a message asking the agent to retry - no
+  `NetworkAccessRequest` is created for that call. `check_network_access_status` doesn't need this
+  check; it never used `sandboxName` in the first place.
+- The proactive `POST /api/sandboxes/{name}/register` endpoint stays - it's a useful way for an
+  operator to pre-warm a sandbox and skip the one-retry round trip, but is no longer required for
+  correctness.
+
+A brand-new sandbox's very first `request_network_access` call will therefore always get a
+"registering now, please retry" response once, then succeed normally - including catching up any
+*other* sandboxes that started around the same time, since `sbx ls` returns all of them. The
+`SKILL.md` shipped in `sandbox-kit` was updated to tell the agent this is expected, not an error.
+
+**`sbx ls`'s JSON flag spelling is version-sensitive** (`--json` pre-v0.48.0, `--format json` from
+v0.48.0 on, per the same release notes) - `SbxCliSandboxListAdapter` takes the exact args as a
+configurable list (`GOVERSBX_SBX_LS_FORMAT_ARGS`, default `--format json`) rather than hardcoding
+one spelling, for exactly this reason.
+
+Verification performed: `./gradlew :daemon:test` (29 tests total; new ones cover
+`isUnsubstitutedPlaceholder`, bulk registration including the not-re-registering-already-registered
+and retry-after-failure cases, JSON parsing of a realistic `sbx ls` fixture built from the user's
+real pasted output, and an MCP-level test asserting the retry message and that no network-access
+request gets created) plus a manual end-to-end curl session simulating an unregistered sandbox's
+first call and confirming the exact retry message, with the expected (and gracefully handled)
+`sbx: No such file or directory` error logged since no real `sbx` binary exists in this dev
+environment.
+
+Sources consulted (via `gh api`, not search-engine summaries, after confirming `api.github.com`
+access): [`docker/sbx-releases` releases](https://github.com/docker/sbx-releases/releases)
+(specifically the entries documenting live secret updates and the `sbx ls` v0.48.0 JSON shape
+change), plus the user's own pasted `sbx ls --format json` output for the real field names.

@@ -3,6 +3,7 @@ package run.fabian.daemon.mcp;
 import run.fabian.daemon.mcp.tool.CheckNetworkAccessStatusTool;
 import run.fabian.daemon.mcp.tool.RequestNetworkAccessTool;
 import run.fabian.daemon.networkaccess.api.NetworkAccessApi;
+import run.fabian.daemon.sandboxidentity.api.SandboxIdentityApi;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapperSupplier;
 import io.modelcontextprotocol.server.McpServer;
@@ -33,7 +34,7 @@ public final class McpContext {
         this.server = server;
     }
 
-    public static McpContext build(NetworkAccessApi networkAccessApi) {
+    public static McpContext build(NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi) {
         McpJsonMapper jsonMapper = new JacksonMcpJsonMapperSupplier().get();
 
         HttpServletStreamableServerTransportProvider servlet = HttpServletStreamableServerTransportProvider.builder()
@@ -47,7 +48,7 @@ public final class McpContext {
                 .serverInfo("goversbx-network", "0.2.0")
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .tools(
-                        RequestNetworkAccessTool.create(networkAccessApi),
+                        RequestNetworkAccessTool.create(networkAccessApi, sandboxIdentityApi),
                         CheckNetworkAccessStatusTool.create(networkAccessApi))
                 .build();
 

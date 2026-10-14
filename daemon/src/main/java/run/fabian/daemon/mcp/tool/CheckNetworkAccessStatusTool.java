@@ -27,10 +27,9 @@ public final class CheckNetworkAccessStatusTool {
         inputSchema.put("properties", properties);
         inputSchema.put("required", java.util.List.of("requestId"));
 
-        McpSchema.Tool tool = McpSchema.Tool.builder("check_network_access_status")
+        McpSchema.Tool tool = McpSchema.Tool.builder("check_network_access_status", inputSchema)
                 .description("Check the current status of a previously-submitted network access request "
                         + "without waiting - use after request_network_access returned 'pending'.")
-                .inputSchema(inputSchema)
                 .build();
 
         return McpServerFeatures.SyncToolSpecification.builder()

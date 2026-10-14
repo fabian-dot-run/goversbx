@@ -2,8 +2,8 @@
 
 Guidance for AI coding agents working in this repository. See `README.md` for what the project
 does and `docs/plan.md` for the full design rationale, open questions, and milestone status
-(including the 2026-10-14 revisions that merged the MCP server into the daemon and added verified
-sandbox identity via `sbx secret set-custom`).
+(including the 2026-10-14 revisions that merged the MCP server into the daemon and added reactive,
+verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 
 ## Build & run
 
@@ -47,17 +47,17 @@ why). Internally it is split into bounded contexts under `daemon/src/main/java/r
   `RequestStatus`).
 - **`mcp`** - pure MCP-protocol translation. Has no domain of its own by design - it only adapts
   MCP tool calls into calls on `networkaccess.api`.
-- **`sandboxidentity`** - registers a sandbox's proxy-verified identity secret before that sandbox
-  starts (`sbx secret set-custom`, see "Sandbox identity" below). No domain either - it's a thin
-  `application` (+ `port`) → `adapter` wrapper around one `sbx` CLI call, same shape as
-  `networkaccess`'s `sbx` adapter. `mcp` doesn't call into this context at all - it just reads the
-  header this context's registration makes trustworthy.
+- **`sandboxidentity`** - registers a sandbox's proxy-verified identity secret, reactively
+  (`sbx secret set-custom` + `sbx ls`, see "Sandbox identity" below). No domain - it's a thin
+  `application` (+ `port`) → `adapter` wrapper around two `sbx` CLI calls, same shape as
+  `networkaccess`'s `sbx` adapter. Publishes `sandboxidentity.api.SandboxIdentityApi`, because
+  `mcp` *does* call into this context now (to trigger registration when it sees an unregistered
+  sandbox) - same cross-context rule as `networkaccess.api`.
 
 **The rule**: a bounded context must never import another one's `domain`, `.application`, or
-`.adapter` directly - only its published `.api` package (where one exists; `sandboxidentity` has
-none because nothing else needs to call it). This is enforced by convention/code review, not by the
-Java module system (JPMS would be real overkill here given Jetty/Reactor aren't cleanly
-modularized). If you add a fourth concern to this daemon, give it the same shape.
+`.adapter` directly - only its published `.api` package. This is enforced by convention/code
+review, not by the Java module system (JPMS would be real overkill here given Jetty/Reactor aren't
+cleanly modularized). If you add a fourth concern to this daemon, give it the same shape.
 
 Within `networkaccess`: `domain` has zero framework dependencies (no Javalin, no Jetty, no MCP
 SDK, no `ProcessBuilder`) and owns its own invariants - e.g. `NetworkAccessRequest.approve()`/
@@ -85,21 +85,37 @@ Identity travels as an HTTP header (`X-Goversbx-Sandbox-Name`, see `McpContext`'
 `exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY)` - there is no more
 per-process `$SANDBOX_NAME` env var now that one daemon process serves every sandbox.
 
-This header is now **proxy-verified, not self-reported**, via a confirmed, public `sbx` feature:
+This header is **proxy-verified, not self-reported**, via a confirmed, public `sbx` feature:
 `sbx secret set-custom --sandbox <name> --target <host> --env <VAR> --placeholder <p> --value <v>`
-makes a sandbox see only the placeholder `<p>` (as env var `<VAR>`), while the sbx proxy rewrites
-`<p>` to `<v>` in every outbound HTTP header sent to `<host>` - confirmed to work for arbitrary
-custom headers (not just `Authorization`), confirmed scopable per-sandbox. `sandboxidentity`'s
-`SandboxIdentityService.register(sandboxName)` runs this with `<v> = sandboxName` itself (identity
-needs to be unforgeable, not secret, so there's no separate opaque token to manage).
-`sandbox-kit/startup/000-cmd.sh` reads the placeholder from `$GOVERSBX_SANDBOX_TOKEN` (not
-`$SANDBOX_NAME`) when building the header.
+makes the sbx proxy rewrite `<p>` to `<v>` in every outbound HTTP header sent to `<host>` -
+confirmed to work for arbitrary custom headers (not just `Authorization`), confirmed scopable
+per-sandbox, and - this is the important part - **confirmed to apply to already-running sandboxes
+without a restart** (checked directly against `docker/sbx-releases`' GitHub release notes via
+`gh api`, not a search summary). That last point is why registration can be fully reactive:
 
-**This only works if an operator calls `POST /api/sandboxes/<name>/register` (loopback admin API)
-before that sandbox's kit-install step runs** - `$GOVERSBX_SANDBOX_TOKEN` doesn't exist until then.
-That ordering isn't automated yet (see `docs/plan.md`'s second 2026-10-14 revision) - don't assume
-every sandbox has gone through this, and don't remove the `McpContext` fallback to
-`"unknown-sandbox"` for the case where it hasn't.
+- `sandbox-kit/startup/000-cmd.sh`'s `--header` value is a **hardcoded literal**
+  (`goversbx-sandbox-identity-placeholder-v1`), never read from an env var. `claude mcp add
+  --header` resolves its value once, at registration time, and freezes it into `~/.claude.json` -
+  a per-sandbox env var that didn't exist yet at that moment would be frozen in as empty forever.
+  A shared hardcoded literal has no such timing dependency: the daemon-side substitution rule can
+  start applying at any later point, live.
+- `McpContext.SANDBOX_NAME_HEADER`'s value arriving **unchanged** (still equal to the literal
+  placeholder) is the signal that a sandbox isn't registered yet -
+  `SandboxIdentityApi.isUnsubstitutedPlaceholder(...)`. `RequestNetworkAccessTool` checks this
+  before doing anything else; if true, it calls `registerAnyUnregisteredSandboxes()` (which runs
+  `sbx ls` and registers every running sandbox this daemon process doesn't already know about -
+  not just the one that triggered it) and tells the agent to retry, without creating a
+  `NetworkAccessRequest`.
+- `GOVERSBX_SBX_LS_FORMAT_ARGS` (default `--format json`) exists because `sbx ls`'s JSON flag
+  spelling changed across `sbx` versions (`--json` before v0.48.0) - don't hardcode one spelling if
+  you touch `SbxCliSandboxListAdapter`.
+- `SandboxSummary` (the `sbx ls` JSON row DTO) only declares `name`/`status` and ignores the rest
+  via `@JsonIgnoreProperties(ignoreUnknown = true)` - this is deliberate, not an oversight; don't
+  "complete" it with every field sbx happens to return.
+
+The admin-only `POST /api/sandboxes/{name}/register` endpoint still exists for pre-warming a
+sandbox manually, but nothing requires it anymore - don't assume it's the only path a sandbox gets
+registered through.
 
 ## Testing conventions
 

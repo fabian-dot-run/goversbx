@@ -26,6 +26,12 @@ looping on retries.
   Use this after a `pending` result, spaced out over a reasonable interval (seconds to low tens of
   seconds) rather than tight-looping.
 
+If `request_network_access` responds that this sandbox's identity isn't registered yet and asks
+you to retry, that's expected for a brand-new sandbox's very first call - just call
+`request_network_access` again with the same arguments after a few seconds. No `requestId` was
+created yet in that case, so retry the original call rather than calling
+`check_network_access_status`.
+
 ## When to use this vs. just retrying
 
 - A single transient network error is not a reason to call this tool — only reach for it when the

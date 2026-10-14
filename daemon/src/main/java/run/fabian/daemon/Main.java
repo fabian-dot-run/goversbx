@@ -9,15 +9,18 @@ import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
+import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliSandboxListAdapter;
 import run.fabian.daemon.sandboxidentity.adapter.web.SandboxIdentityController;
 import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 
 public final class Main {
@@ -33,16 +36,18 @@ public final class Main {
         String identityTargetHost = env("GOVERSBX_IDENTITY_TARGET_HOST", "daemon.internal");
         String identityEnvVar = env("GOVERSBX_IDENTITY_ENV_VAR", "GOVERSBX_SANDBOX_TOKEN");
         String identityPlaceholder = env("GOVERSBX_IDENTITY_PLACEHOLDER", "goversbx-sandbox-identity-placeholder-v1");
+        List<String> lsFormatArgs = List.of(env("GOVERSBX_SBX_LS_FORMAT_ARGS", "--format json").split(" "));
 
         RequestRepository repository = new InMemoryRequestRepository();
         SbxPolicyPort sbxPolicyPort = new SbxCliPolicyAdapter(sbxBinary, dryRun);
         NetworkAccessService networkAccessService = new NetworkAccessService(repository, sbxPolicyPort);
 
         SbxCustomSecretPort sbxCustomSecretPort = new SbxCliCustomSecretAdapter(sbxBinary, dryRun);
-        SandboxIdentityService sandboxIdentityService =
-                new SandboxIdentityService(sbxCustomSecretPort, identityTargetHost, identityEnvVar, identityPlaceholder);
+        SbxSandboxListPort sbxSandboxListPort = new SbxCliSandboxListAdapter(sbxBinary, lsFormatArgs);
+        SandboxIdentityService sandboxIdentityService = new SandboxIdentityService(
+                sbxCustomSecretPort, sbxSandboxListPort, identityTargetHost, identityEnvVar, identityPlaceholder);
 
-        McpContext mcp = McpContext.build(networkAccessService);
+        McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService);
 
         Javalin sandboxApp = Javalin.create(config ->
                 config.jetty.modifyServletContextHandler(handler ->

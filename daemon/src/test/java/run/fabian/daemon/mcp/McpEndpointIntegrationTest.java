@@ -12,6 +12,7 @@ import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestReposi
 import run.fabian.daemon.networkaccess.adapter.sbx.SbxCliPolicyAdapter;
 import run.fabian.daemon.networkaccess.api.RequestStatus;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
+import run.fabian.daemon.sandboxidentity.api.SandboxIdentityApi;
 
 import java.time.Duration;
 import java.util.List;
@@ -20,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,10 +37,25 @@ class McpEndpointIntegrationTest {
                 handler.addServlet(new ServletHolder(mcp.servlet()), "/mcp/*")));
     }
 
+    /** Never flags any header as the unsubstituted placeholder - for tests not exercising that path. */
+    private static SandboxIdentityApi noopSandboxIdentity() {
+        return new SandboxIdentityApi() {
+            @Override
+            public boolean isUnsubstitutedPlaceholder(String sandboxNameHeaderValue) {
+                return false;
+            }
+
+            @Override
+            public void registerAnyUnregisteredSandboxes() {
+                throw new AssertionError("should not be called when isUnsubstitutedPlaceholder is false");
+            }
+        };
+    }
+
     @Test
     void listsBothTools() {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connect(client.getOrigin())) {
@@ -53,7 +70,7 @@ class McpEndpointIntegrationTest {
     @Test
     void requestNetworkAccessReturnsPendingWhenNobodyDecides() {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connect(client.getOrigin())) {
@@ -71,7 +88,7 @@ class McpEndpointIntegrationTest {
     void requestNetworkAccessUnblocksAsSoonAsApproved() throws Exception {
         InMemoryRequestRepository repository = new InMemoryRequestRepository();
         NetworkAccessService service = new NetworkAccessService(repository, new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         ExecutorService approver = Executors.newSingleThreadExecutor();
         try {
@@ -94,6 +111,39 @@ class McpEndpointIntegrationTest {
             approver.shutdownNow();
             approver.awaitTermination(1, TimeUnit.SECONDS);
         }
+    }
+
+    @Test
+    void requestNetworkAccessTriggersRegistrationAndAsksForRetryWhenSandboxIsUnregistered() throws Exception {
+        String placeholder = "the-placeholder";
+        AtomicBoolean registrationTriggered = new AtomicBoolean(false);
+        NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
+        SandboxIdentityApi sandboxIdentityApi = new SandboxIdentityApi() {
+            @Override
+            public boolean isUnsubstitutedPlaceholder(String sandboxNameHeaderValue) {
+                return placeholder.equals(sandboxNameHeaderValue);
+            }
+
+            @Override
+            public void registerAnyUnregisteredSandboxes() {
+                registrationTriggered.set(true);
+            }
+        };
+        McpContext mcp = McpContext.build(service, sandboxIdentityApi);
+
+        JavalinTest.test(newApp(mcp), (server, client) -> {
+            try (McpSyncClient mcpClient = connectWithHeader(client.getOrigin(), McpContext.SANDBOX_NAME_HEADER, placeholder)) {
+                McpSchema.CallToolResult result = mcpClient.callTool(McpSchema.CallToolRequest.builder("request_network_access")
+                        .arguments(Map.of("host", "api.example.com", "reason", "smoke test", "timeoutSeconds", 1))
+                        .build());
+
+                String text = firstTextContent(result);
+                assertTrue(text.contains("registering it now"), text);
+            }
+        });
+
+        assertTrue(registrationTriggered.get());
+        assertEquals(0, service.list(RequestStatus.PENDING).size());
     }
 
     private static UUID pollForPendingRequestId(NetworkAccessService service) {
@@ -121,6 +171,16 @@ class McpEndpointIntegrationTest {
         return mcpClient;
     }
 
+    private static McpSyncClient connectWithHeader(String origin, String headerName, String headerValue) {
+        McpSyncClient mcpClient = McpClient
+                .sync(HttpClientStreamableHttpTransport.builder(origin + "/mcp")
+                        .httpRequestCustomizer((builder, method, uri, body, ctx) -> builder.header(headerName, headerValue))
+                        .build())
+                .build();
+        mcpClient.initialize();
+        return mcpClient;
+    }
+
     private static String firstTextContent(McpSchema.CallToolResult result) {
         return result.content().stream()
                 .filter(McpSchema.TextContent.class::isInstance)
@@ -133,7 +193,7 @@ class McpEndpointIntegrationTest {
     @Test
     void checkStatusForUnknownIdIsError() {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connect(client.getOrigin())) {

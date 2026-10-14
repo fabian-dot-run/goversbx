@@ -3,6 +3,7 @@ package run.fabian.daemon.mcp.tool;
 import run.fabian.daemon.mcp.McpContext;
 import run.fabian.daemon.networkaccess.api.NetworkAccessApi;
 import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
+import run.fabian.daemon.sandboxidentity.api.SandboxIdentityApi;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 
@@ -15,7 +16,8 @@ public final class RequestNetworkAccessTool {
     private RequestNetworkAccessTool() {
     }
 
-    public static McpServerFeatures.SyncToolSpecification create(NetworkAccessApi networkAccessApi) {
+    public static McpServerFeatures.SyncToolSpecification create(
+            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi) {
         Map<String, Object> hostProperty = new LinkedHashMap<>();
         hostProperty.put("type", "string");
         hostProperty.put("description", "Domain or host the agent needs to reach, e.g. api.example.com");
@@ -41,25 +43,26 @@ public final class RequestNetworkAccessTool {
         inputSchema.put("properties", properties);
         inputSchema.put("required", java.util.List.of("host", "reason"));
 
-        McpSchema.Tool tool = McpSchema.Tool.builder("request_network_access")
+        McpSchema.Tool tool = McpSchema.Tool.builder("request_network_access", inputSchema)
                 .description("""
                         Request outbound network access to a host from this sandbox. A human is asked to \
                         approve or deny the request; approval is permanent for this sandbox. Returns \
                         immediately once approved/denied, or after timeoutSeconds if still pending - in the \
                         pending case, call check_network_access_status later with the returned requestId.""")
-                .inputSchema(inputSchema)
                 .build();
 
         return McpServerFeatures.SyncToolSpecification.builder()
                 .tool(tool)
                 .callHandler((exchange, request) -> {
                     String sandboxName = (String) exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY);
-                    return handle(networkAccessApi, sandboxName, request);
+                    return handle(networkAccessApi, sandboxIdentityApi, sandboxName, request);
                 })
                 .build();
     }
 
-    private static McpSchema.CallToolResult handle(NetworkAccessApi networkAccessApi, String sandboxName, McpSchema.CallToolRequest request) {
+    private static McpSchema.CallToolResult handle(
+            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi,
+            String sandboxName, McpSchema.CallToolRequest request) {
         Map<String, Object> args = request.arguments();
         String host = stringArg(args, "host");
         String reason = stringArg(args, "reason");
@@ -69,6 +72,14 @@ public final class RequestNetworkAccessTool {
             return McpSchema.CallToolResult.builder()
                     .isError(true)
                     .addTextContent("Both 'host' and 'reason' are required.")
+                    .build();
+        }
+
+        if (sandboxIdentityApi.isUnsubstitutedPlaceholder(sandboxName)) {
+            sandboxIdentityApi.registerAnyUnregisteredSandboxes();
+            return McpSchema.CallToolResult.builder()
+                    .addTextContent("This sandbox's identity isn't registered with the daemon yet - "
+                            + "registering it now. Please retry request_network_access in a few seconds.")
                     .build();
         }
 
