@@ -75,7 +75,9 @@ healthy() {
     && curl -s --max-time 2 "http://127.0.0.1:$SANDBOX_API_PORT/api/health" 2>/dev/null | grep -q '"ok"'
 }
 
-port_taken() { curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$1/"; }
+# Only curl's "couldn't connect" (7) means free: a process that accepts but never answers (e.g. a
+# JVM daemon whose jar was rebuilt under it) times out (28) and still holds the port.
+port_taken() { curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$1/"; [ $? -ne 7 ]; }
 
 build_if_needed() {
   if [ -f "$JAR" ] && [ -z "$(find "$REPO_DIR/daemon/src" "$REPO_DIR/daemon/build.gradle.kts" -newer "$JAR" -print -quit)" ]; then
@@ -100,7 +102,7 @@ start_daemon() {
     return 0
   fi
   for port in "$SANDBOX_API_PORT" "$ADMIN_PORT"; do
-    port_taken "$port" && die "port $port is in use by something that isn't a healthy goversbx daemon"
+    port_taken "$port" && die "port $port is in use by something that isn't a healthy goversbx daemon - find it with: lsof -nP -iTCP:$port -sTCP:LISTEN"
   done
   command -v "$SBX" >/dev/null 2>&1 || die "'$SBX' not found on PATH"
   if [ -n "$DAEMON_BIN" ]; then
@@ -108,7 +110,10 @@ start_daemon() {
   else
     command -v java >/dev/null 2>&1 || die "java not found on PATH (JDK 21+ needed in a repo checkout)"
     build_if_needed
-    set -- java -jar "$JAR"
+    # Run a copy: a JVM loads classes from its jar lazily, so rebuilding the jar under a running
+    # daemon breaks it (NoClassDefFoundError on the next new code path, e.g. accepting a connection).
+    cp "$JAR" "$STATE_DIR/goversbx-daemon.jar"
+    set -- java -jar "$STATE_DIR/goversbx-daemon.jar"
   fi
   GOVERSBX_SBX_DRY_RUN="${GOVERSBX_SBX_DRY_RUN:-false}" \
   GOVERSBX_SBX_BINARY="${GOVERSBX_SBX_BINARY:-$SBX}" \

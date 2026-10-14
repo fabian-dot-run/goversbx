@@ -72,11 +72,26 @@ release and updates `Formula/goversbx.rb` in the tap repo (rendered from
 `packaging/homebrew/goversbx.rb.template`; setup notes at the top of the workflow). Locally, on any
 platform: `GRAALVM_HOME=... scripts/package-release.sh`.
 
-The native image needs reflection/resource metadata for what the daemon serializes and serves.
-`daemon/src/main/resources/META-INF/native-image/` holds it; after changing JSON types, routes or
-the admin UI's files, regenerate it with `GRAALVM_HOME=... scripts/native-metadata.sh` (runs
-`scripts/testing/daemon-smoke.sh` under GraalVM's tracing agent) and commit the result.
-`./gradlew :daemon:nativeCompile` builds just the binary.
+### Testing the native binary
+
+`daemon/src/binaryTest` is a black-box contract suite: it starts the daemon as a process and talks
+to it only over HTTP/MCP, against a scriptable fake `sbx`. It covers the admin UI (every file, byte
+for byte), the admin API and its error paths, SSE, MCP over raw Streamable HTTP (every protocol
+version, both tools, schema validation, sessions), every client capability the MCP SDK knows
+(generated from the SDK's own types), the official MCP Java SDK client, traffic recorded from real
+Claude Code, pi and opencode (`client-fixtures/`, re-record with
+`scripts/testing/record-client-fixtures.sh`), sbx failures and concurrency.
+
+```bash
+./gradlew :daemon:binaryTestJar        # against the jar (also part of ./gradlew check)
+./gradlew :daemon:binaryTestNative     # against the native binary (GRAALVM_HOME + C toolchain)
+```
+
+native-image needs reflection/resource metadata for everything the daemon touches reflectively.
+It isn't maintained by hand: `nativeCompile` depends on `nativeMetadata`, which runs this suite
+against the jar under GraalVM's tracing agent and builds the binary from that trace. A code path
+the suite doesn't exercise has no metadata, so it would fail only in the binary: new behavior
+needs a test here.
 
 ## Quick start (repo checkout)
 

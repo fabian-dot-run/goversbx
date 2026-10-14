@@ -3,7 +3,39 @@
 Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-## macOS installer: native binary + Homebrew tap (2026-10-14, not yet released)
+## Native binary contract tests + enforced metadata (2026-10-14, not yet released)
+
+v0.2.0's native binary failed with real Claude Code: `initialize` carries capability objects
+(`roots`, nested `elicitation.form/url`) the bash smoke test never sent, so the tracing agent never
+saw `McpSchema$ClientCapabilities$RootCapabilities` deserialized. Fixed and made structural:
+
+- `McpSchemaReflectionFeature` (`--features`) registers every `McpSchema` type at native build time.
+- `daemon/src/binaryTest`: black-box contract suite (55 tests) against a daemon process + `FakeSbx`
+  (scriptable sbx recording exact argv). Admin UI byte-for-byte, admin API incl. 400/404/409, SSE,
+  raw MCP (4 protocol versions, both tools, schema validation, sessions, GET stream ended by
+  DELETE), a capability matrix generated from the SDK's own records, the MCP Java SDK client,
+  replay of traffic **recorded from real Claude Code 2.1.300, pi 1.2.0 and opencode 1.19.0**
+  (`client-fixtures/`, `scripts/testing/record-client-fixtures.sh` + `record-mcp-traffic.py`),
+  sbx failure injection (ls/set-custom/policy exit 1, malformed JSON, missing binary), 25
+  concurrent blocked calls, SIGTERM shutdown. Replaces `daemon-smoke.sh`/`native-metadata.sh`.
+- It found a second native-only bug the smoke test couldn't: **every MCP error response was a 500**
+  in the binary (Claude Code's `server/discover` probe, session-less requests) - Jackson serializing
+  an exception needs `Throwable` reflection.
+- **Metadata generation is enforced in Gradle**: `nativeCompile` depends on `nativeMetadata` (the
+  suite against the jar under the tracing agent -> `build/native-metadata/`, passed via
+  `configurationFileDirectories`). No generated metadata is committed any more. Verified from a
+  clean slate: trace 55/55 -> compile -> `binaryTestNative` 55/55 (1m22s); unchanged inputs are
+  UP-TO-DATE; `./gradlew check` without GraalVM runs the suite against the jar (25s).
+- Found while writing it (behavior pinned, not changed): the MCP SDK validates tool arguments
+  against the input schema before the handler (missing `reason`, `timeoutSeconds` 0/121 never reach
+  it); the MCP GET stream sends its headers only with the first event or when the session ends.
+- `scripts/package-release.sh` (and so the release workflow) runs `check` + `binaryTestNative`.
+- Launcher (`scripts/goversbx`): a port held by a process that accepts but never answers is now
+  "taken" (with an `lsof` hint) instead of "free"; a repo-checkout daemon runs from a copy of the jar.
+- **Next**: release v0.2.1 (the macOS runner runs the same chain); the user's brew install is on the
+  broken v0.2.0.
+
+## macOS installer: native binary + Homebrew tap (2026-10-14, v0.2.0 released)
 
 Goal: `brew install` on Apple Silicon, no JVM. Decided with the user: public GitHub repos for the
 code and the tap (Homebrew can't download from the private <private-git-host> without a custom download
@@ -38,8 +70,18 @@ strategy), arm64 only.
   empty tap, a re-run with an unchanged formula is a no-op. Never run on GitHub yet. Public repos:
   `fabian-dot-run/goversbx` (history rewritten before publishing: author `mail@fabian.run`, no
   Docker username or private git host) and `fabian-dot-run/homebrew-goversbx` (empty).
-- **Not verified at all yet: the macOS build itself.** The first tag push (or a manual
-  `workflow_dispatch`) is where the macOS binary gets built and smoke-tested for the first time.
+- **Released v0.2.0** (2026-10-14): dry run then tag; macOS arm64 native build + all 16 smoke
+  checks green on the runner, GitHub release with tarball + sha256, formula pushed to the tap via
+  the deploy key, formula sha256 matches the published tarball. `brew install` worked on the user's
+  Mac.
+- **First `goversbx run` after the brew install failed** - not the native binary: the user's old
+  repo-checkout JVM daemon still held 8787/8788, broken because the jar had been rebuilt under it
+  (this sandbox writes to the host checkout; lazy class loading -> `NoClassDefFoundError:
+  ManagedSelector$Accept` on every accept). It accepted connections but never answered, and the
+  launcher's port check read curl's timeout (exit 28) as "free", started the native daemon, which
+  couldn't bind, and showed the old daemon's log spam. Fixed in the launcher (not yet released):
+  only curl exit 7 counts as a free port, with an `lsof` hint; a repo-checkout daemon runs from a
+  copy of the jar in the state dir, so rebuilds can't break it.
 
 ## MVP verified end to end with Claude Code (third real run, 2026-10-14, sbx v0.48.0)
 

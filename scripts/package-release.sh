@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the native daemon, smoke-tests it, and packs a release tarball for the current platform:
+# Builds the native daemon, runs the contract test suite against it, and packs a release tarball
+# for the current platform:
 #
 #   GRAALVM_HOME=/path/to/graalvm VERSION=0.2.0 scripts/package-release.sh
 #
@@ -35,12 +36,12 @@ OUT_DIR="$REPO_DIR/build/release"
 STAGE="$OUT_DIR/$NAME"
 TARBALL="$OUT_DIR/$NAME-$OS-$ARCH.tar.gz"
 
-echo "== building goversbx $VERSION for $OS-$ARCH"
-(cd "$REPO_DIR" && ./gradlew --no-daemon -q :sandbox-kit:check :daemon:nativeCompile)
+echo "== building and contract-testing goversbx $VERSION for $OS-$ARCH"
+# binaryTestNative = trace the contract suite against the jar (nativeMetadata), build the native
+# binary from that trace (nativeCompile), then run the same suite against the binary. Nothing gets
+# packed unless every test passes on both.
+(cd "$REPO_DIR" && ./gradlew --no-daemon --console=plain :sandbox-kit:check :daemon:check :daemon:binaryTestNative)
 BIN="$REPO_DIR/daemon/build/native/nativeCompile/goversbx-daemon"
-
-echo "== smoke-testing the native binary"
-"$REPO_DIR/scripts/testing/daemon-smoke.sh" "$BIN"
 
 echo "== packing $TARBALL"
 rm -rf "$STAGE" "$TARBALL" "$TARBALL.sha256"

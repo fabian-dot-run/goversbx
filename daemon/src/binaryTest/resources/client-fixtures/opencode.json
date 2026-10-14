@@ -1,0 +1,45 @@
+{
+  "client": "opencode 1.19.0",
+  "recordedAt": "2026-10-14",
+  "note": "Recorded from the real client with scripts/testing/record-client-fixtures.sh; replayed by RecordedClientReplayTest. Session id and sandbox header are substituted at replay time.",
+  "steps": [
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": "opencode/1.19.0"
+      },
+      "usesSession": false,
+      "body": "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"roots\":{}},\"clientInfo\":{\"name\":\"opencode\",\"version\":\"1.19.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "mcp-protocol-version": "2025-11-25",
+        "User-Agent": "opencode/1.19.0"
+      },
+      "usesSession": true,
+      "body": "{\"method\":\"notifications/initialized\",\"jsonrpc\":\"2.0\"}",
+      "expectStatus": 202,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "mcp-protocol-version": "2025-11-25",
+        "User-Agent": "opencode/1.19.0"
+      },
+      "usesSession": true,
+      "body": "{\"method\":\"tools/list\",\"jsonrpc\":\"2.0\",\"id\":1}",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "client": "claude-code 2.1.300",
+  "recordedAt": "2026-10-14",
+  "note": "Recorded from the real client with scripts/testing/record-client-fixtures.sh; replayed by RecordedClientReplayTest. Session id and sandbox header are substituted at replay time.",
+  "steps": [
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": "claude-code/2.1.300 (sdk-cli)",
+        "mcp-method": "server/discover",
+        "mcp-protocol-version": "2026-07-28"
+      },
+      "usesSession": false,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":\"server-discover-probe-1\",\"method\":\"server/discover\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"claude-code\",\"title\":\"Claude Code\",\"version\":\"2.1.300\",\"description\":\"Anthropic's agentic coding tool\",\"websiteUrl\":\"https://claude.com/claude-code\"},\"io.modelcontextprotocol/clientCapabilities\":{\"roots\":{\"listChanged\":true},\"elicitation\":{\"form\":{},\"url\":{}}}}}}",
+      "expectStatus": 400,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": "claude-code/2.1.300 (sdk-cli)"
+      },
+      "usesSession": false,
+      "body": "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"roots\":{\"listChanged\":true},\"elicitation\":{\"form\":{},\"url\":{}}},\"clientInfo\":{\"name\":\"claude-code\",\"title\":\"Claude Code\",\"version\":\"2.1.300\",\"description\":\"Anthropic's agentic coding tool\",\"websiteUrl\":\"https://claude.com/claude-code\"}},\"jsonrpc\":\"2.0\",\"id\":0}",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": "claude-code/2.1.300 (sdk-cli)",
+        "mcp-protocol-version": "2025-11-25"
+      },
+      "usesSession": true,
+      "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
+      "expectStatus": 202,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "User-Agent": "claude-code/2.1.300 (sdk-cli)",
+        "mcp-protocol-version": "2025-11-25"
+      },
+      "usesSession": true,
+      "body": "{\"method\":\"tools/list\",\"jsonrpc\":\"2.0\",\"id\":1}",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    }
+  ]
+}

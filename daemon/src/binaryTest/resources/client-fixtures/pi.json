@@ -1,0 +1,69 @@
+{
+  "client": "pi 1.2.0",
+  "recordedAt": "2026-10-14",
+  "note": "Recorded from the real client with scripts/testing/record-client-fixtures.sh; replayed by RecordedClientReplayTest. Session id and sandbox header are substituted at replay time.",
+  "steps": [
+    {
+      "method": "POST",
+      "headers": {
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+        "user-agent": "undici"
+      },
+      "usesSession": false,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"roots\":{}},\"clientInfo\":{\"name\":\"pi\",\"version\":\"1.2.0\"}}}",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+        "MCP-Protocol-Version": "2025-11-25",
+        "user-agent": "undici"
+      },
+      "usesSession": true,
+      "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
+      "expectStatus": 202,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "POST",
+      "headers": {
+        "accept": "application/json, text/event-stream",
+        "content-type": "application/json",
+        "MCP-Protocol-Version": "2025-11-25",
+        "user-agent": "undici"
+      },
+      "usesSession": true,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "GET",
+      "headers": {
+        "accept": "text/event-stream",
+        "MCP-Protocol-Version": "2025-11-25",
+        "user-agent": "undici"
+      },
+      "usesSession": true,
+      "body": "",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    },
+    {
+      "method": "DELETE",
+      "headers": {
+        "MCP-Protocol-Version": "2025-11-25",
+        "accept": "*/*",
+        "user-agent": "undici"
+      },
+      "usesSession": true,
+      "body": "",
+      "expectStatus": 200,
+      "expectJsonRpcError": false
+    }
+  ]
+}

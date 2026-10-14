@@ -2,7 +2,7 @@
 #
 # Push a tag `v<version>` to release:
 #   1. build the native daemon on an Apple Silicon runner (native-image can't cross-compile)
-#   2. smoke-test that binary (scripts/testing/daemon-smoke.sh) - nothing is published if it fails
+#   2. run the contract test suite (daemon/src/binaryTest) against it - nothing is published if a test fails
 #   3. attach goversbx-<version>-darwin-arm64.tar.gz (+ .sha256) to a GitHub release
 #   4. render packaging/homebrew/goversbx.rb.template into the tap repo's Formula/goversbx.rb
 #
