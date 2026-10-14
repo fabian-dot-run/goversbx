@@ -96,6 +96,7 @@ function notificationsGranted() {
 function updateNotificationControls() {
   const button = document.querySelector('#notify-button');
   const state = document.querySelector('#notify-state');
+  document.querySelector('#notify-test-button').hidden = !notificationsGranted();
   if (!('Notification' in window)) {
     button.hidden = true;
     state.textContent = 'This browser does not support notifications.';
@@ -148,6 +149,25 @@ async function notifyCreated(r) {
     console.warn('goversbx: could not show a notification', e);
     document.querySelector('#notify-state').textContent =
       'Could not show a notification - check that your OS allows this browser to send notifications.';
+  }
+}
+
+// Checks the browser -> OS path without a real request; no buttons, so nothing can be decided.
+async function sendTestNotification() {
+  const title = 'goversbx test notification';
+  const options = { body: 'If you see this, new requests will show up here too.', tag: 'goversbx-test' };
+  try {
+    if (swRegistration) {
+      await swRegistration.showNotification(title, options);
+    } else {
+      new Notification(title, options);
+    }
+    document.querySelector('#notify-state').textContent =
+      'Test notification sent - if nothing appeared, check the OS notification settings for this browser.';
+  } catch (e) {
+    console.warn('goversbx: test notification failed', e);
+    document.querySelector('#notify-state').textContent =
+      `Test notification failed (${e.message || e}) - check that your OS allows this browser to send notifications.`;
   }
 }
 
@@ -206,6 +226,7 @@ function connectEvents() {
 }
 
 document.querySelector('#notify-button').addEventListener('click', enableNotifications);
+document.querySelector('#notify-test-button').addEventListener('click', sendTestNotification);
 window.addEventListener('hashchange', refresh);
 updateNotificationControls();
 registerServiceWorker();
