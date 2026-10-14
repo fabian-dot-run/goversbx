@@ -539,3 +539,18 @@ placeholder, and goversbx deliberately uses one placeholder for every sandbox. W
 scoping keeps per-sandbox values apart is not documented; the e2e script now creates a second
 sandbox and checks that each sandbox's request arrives under its own name (step 4b). Fallback if it
 doesn't: per-sandbox placeholders derived from the sandbox name (see `docs/status.md`).
+
+## Revision (2026-10-14): substitution needs `--host localhost`
+
+The second real e2e run registered secrets successfully (with `--host host.docker.internal`) but the
+daemon still received the raw placeholder. `scripts/diagnose-substitution.sh` (header-echo server on
+the host, one sandbox-scoped secret per `--host` variant) settled it on sbx v0.48.0: for traffic from
+a sandbox to `host.docker.internal:<port>`, only `--host localhost` (and the catch-all `**`) are
+substituted - consistent with the network rule for that path also having to be `localhost:<port>`.
+`--host` rejects ports; custom header names are substituted too; HTTPS works. The daemon's
+`GOVERSBX_IDENTITY_TARGET_HOST` now defaults to `localhost`, and the kit scripts' daemon host default
+changed from the fictional `daemon.internal` to `host.docker.internal`.
+
+Still unexplained: in that run, Claude's `claude mcp list` reported "tools fetch failed - Error
+POSTing to endpoint: EOF" once secrets existed; plain curl/Node POSTs through the proxy with such a
+secret present did not reproduce it.

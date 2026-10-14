@@ -21,7 +21,7 @@
 #      ("codemode") would only make them callable from codemode scripts, not visible as tools.
 # 2. Install the shared skill into ~/.agents/skills/, the Agent Skills location pi scans.
 set -e
-DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-daemon.internal}"
+DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-host.docker.internal}"
 DAEMON_PORT="${GOVERSBX_DAEMON_PORT:-8787}"
 SANDBOX_IDENTITY_PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 PI_MCP_CONFIG="${PI_MCP_CONFIG:-$HOME/.pi/agent/mcp.json}"

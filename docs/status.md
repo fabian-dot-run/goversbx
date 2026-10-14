@@ -3,9 +3,18 @@
 Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-**Next step: run `scripts/diagnose-substitution.sh` on the sbx host** and adjust how the daemon
-registers identity secrets based on its result (see "Second real run" below). Then re-run
-`scripts/e2e-claude.sh`. pi/oh-my-pi support exists but is parked until the Claude path works.
+**Next step: re-run `scripts/e2e-claude.sh` on the sbx host** with the `--host localhost` fix from
+the diagnostic below. Still open from the last run: Claude's "Error POSTing to endpoint: EOF".
+pi/oh-my-pi support exists but is parked until the Claude path works.
+
+**Diagnostic result (`scripts/diagnose-substitution.sh`, sbx v0.48.0, user's host):** for plain-HTTP
+traffic from a sandbox to `host.docker.internal:<port>`, `set-custom --host localhost` and `--host **`
+are substituted; `--host host.docker.internal` and `--host *.docker.internal` are **not**; `--host`
+with a port is rejected (`expected host or IP without scheme/port`). Custom header names are
+substituted, not just `Authorization`; HTTPS (httpbin.org) works too. `--env` must match
+`^[A-Z_][A-Z0-9_]*$`. curl and Node POSTs worked before and after registration, including with a
+`--host host.docker.internal` secret present, so the EOF Claude saw is not reproduced by that alone.
+Fix: the daemon registers with `--host localhost` (new default for `GOVERSBX_IDENTITY_TARGET_HOST`).
 
 **Second real run (after the `--host` fix):** registration now succeeds (`sbx secret set-custom
 --sandbox <n> --host host.docker.internal ...` exits 0), but the daemon still receives the **raw
@@ -160,10 +169,11 @@ becomes reachable from that sandbox.
 
 ## Open questions
 
-1. **Sandbox -> daemon network path.** Design assumed `daemon.internal`; for the test we use
-   `host.docker.internal`. To confirm: exact policy command, and that this traffic goes through the
-   sbx proxy (required for header substitution - Claude Code's Node HTTP client honors the
-   sandbox's `HTTP(S)_PROXY` via `NODE_USE_ENV_PROXY=1`).
+1. ~~Sandbox -> daemon network path.~~ **Resolved on a real host:** sandboxes reach the daemon at
+   `http://host.docker.internal:8787` through the sbx proxy, after `sbx policy allow network
+   localhost:8787 --sandbox <n>`; the proxy treats that traffic as `localhost`, so identity secrets
+   use `--host localhost`. (`daemon.internal` from the original design never existed; kit defaults
+   are now `host.docker.internal`.)
 2. **Installing the kit into new sandboxes.** sbx kits are `spec.yaml` (schemaVersion "2") applied
    with `sbx run --kit <git|dir|oci> <agent>`; recent sbx can add kits with startup commands to
    existing sandboxes. Our `startup.sh`/`manifest-fragment.json` drafts are not a real kit yet - a

@@ -30,7 +30,7 @@ class SandboxIdentityServiceTest {
         };
 
         SandboxIdentityService service = new SandboxIdentityService(
-                port, listing(), "daemon.internal", "GOVERSBX_SANDBOX_TOKEN", "the-placeholder");
+                port, listing(), "localhost", "GOVERSBX_SANDBOX_TOKEN", "the-placeholder");
 
         SandboxRegistrationResult result = service.register("sandbox-1");
 
@@ -39,7 +39,7 @@ class SandboxIdentityServiceTest {
 
         Call call = lastCall.get();
         assertEquals("sandbox-1", call.sandboxName());
-        assertEquals("daemon.internal", call.targetHost());
+        assertEquals("localhost", call.targetHost());
         assertEquals("GOVERSBX_SANDBOX_TOKEN", call.envVarName());
         assertEquals("the-placeholder", call.placeholder());
         assertEquals("sandbox-1", call.value());
@@ -50,7 +50,7 @@ class SandboxIdentityServiceTest {
         SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) ->
                 new SbxCustomSecretPort.Result(false, "sbx: command not found");
 
-        SandboxIdentityService service = new SandboxIdentityService(port, listing(), "daemon.internal", "VAR", "placeholder");
+        SandboxIdentityService service = new SandboxIdentityService(port, listing(), "localhost", "VAR", "placeholder");
 
         SandboxRegistrationResult result = service.register("sandbox-2");
 
@@ -62,7 +62,7 @@ class SandboxIdentityServiceTest {
     void recognizesTheUnsubstitutedPlaceholder() {
         SandboxIdentityService service = new SandboxIdentityService(
                 (n, t, e, p, v) -> new SbxCustomSecretPort.Result(true, "ok"),
-                listing(), "daemon.internal", "VAR", "the-placeholder");
+                listing(), "localhost", "VAR", "the-placeholder");
 
         assertTrue(service.isUnsubstitutedPlaceholder("the-placeholder"));
         assertFalse(service.isUnsubstitutedPlaceholder("some-real-sandbox-name"));
@@ -78,7 +78,7 @@ class SandboxIdentityServiceTest {
         };
 
         SandboxIdentityService service = new SandboxIdentityService(
-                port, listing("sandbox-a", "sandbox-b"), "daemon.internal", "VAR", "placeholder");
+                port, listing("sandbox-a", "sandbox-b"), "localhost", "VAR", "placeholder");
 
         service.registerAnyUnregisteredSandboxes();
 
@@ -97,7 +97,7 @@ class SandboxIdentityServiceTest {
 
         SandboxIdentityService service = new SandboxIdentityService(
                 port, listing("goversbx-e2e-1", "claude-goversbx", "goversbx-e2e-1-b"),
-                "daemon.internal", "VAR", "placeholder", java.util.regex.Pattern.compile("goversbx-e2e-1(-b)?"));
+                "localhost", "VAR", "placeholder", java.util.regex.Pattern.compile("goversbx-e2e-1(-b)?"));
 
         service.registerAnyUnregisteredSandboxes();
 
@@ -114,7 +114,7 @@ class SandboxIdentityServiceTest {
         };
 
         SandboxIdentityService service = new SandboxIdentityService(
-                port, listing("sandbox-a"), "daemon.internal", "VAR", "placeholder");
+                port, listing("sandbox-a"), "localhost", "VAR", "placeholder");
 
         service.registerAnyUnregisteredSandboxes();
         service.registerAnyUnregisteredSandboxes();
@@ -131,7 +131,7 @@ class SandboxIdentityServiceTest {
         };
 
         SandboxIdentityService service = new SandboxIdentityService(
-                port, listing("sandbox-a"), "daemon.internal", "VAR", "placeholder");
+                port, listing("sandbox-a"), "localhost", "VAR", "placeholder");
 
         service.registerAnyUnregisteredSandboxes();
         service.registerAnyUnregisteredSandboxes();

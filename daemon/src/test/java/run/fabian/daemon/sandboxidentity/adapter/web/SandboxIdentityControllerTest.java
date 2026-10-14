@@ -29,7 +29,7 @@ class SandboxIdentityControllerTest {
     void registeringASandboxReturnsTheDryRunOutput() throws Exception {
         SandboxIdentityService service = new SandboxIdentityService(
                 new SbxCliCustomSecretAdapter("sbx", true), List::of,
-                "daemon.internal", "GOVERSBX_SANDBOX_TOKEN", "the-placeholder");
+                "localhost", "GOVERSBX_SANDBOX_TOKEN", "the-placeholder");
 
         JavalinTest.test(newApp(service), (server, client) -> {
             Response response = client.request("/api/sandboxes/sandbox-1/register",

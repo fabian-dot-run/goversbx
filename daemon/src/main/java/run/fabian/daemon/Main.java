@@ -34,7 +34,9 @@ public final class Main {
         String sandboxApiBind = env("GOVERSBX_SANDBOX_API_BIND", "0.0.0.0");
         String sbxBinary = env("GOVERSBX_SBX_BINARY", "sbx");
         boolean dryRun = Boolean.parseBoolean(env("GOVERSBX_SBX_DRY_RUN", "true"));
-        String identityTargetHost = env("GOVERSBX_IDENTITY_TARGET_HOST", "daemon.internal");
+        // The sbx proxy sees sandbox traffic to host.docker.internal as "localhost": only
+        // `set-custom --host localhost` gets substituted there (scripts/diagnose-substitution.sh).
+        String identityTargetHost = env("GOVERSBX_IDENTITY_TARGET_HOST", "localhost");
         String identityEnvVar = env("GOVERSBX_IDENTITY_ENV_VAR", "GOVERSBX_SANDBOX_TOKEN");
         String identityPlaceholder = env("GOVERSBX_IDENTITY_PLACEHOLDER", "goversbx-sandbox-identity-placeholder-v1");
         Pattern identitySandboxPattern = Pattern.compile(env("GOVERSBX_IDENTITY_SANDBOX_PATTERN", ".*"));

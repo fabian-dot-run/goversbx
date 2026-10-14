@@ -126,6 +126,10 @@ The admin-only `POST /api/sandboxes/{name}/register` endpoint still exists for p
 sandbox manually, but nothing requires it anymore - don't assume it's the only path a sandbox gets
 registered through.
 
+- `--host localhost`, not `host.docker.internal`: sandboxes call the daemon at
+  `host.docker.internal:8787`, but the sbx proxy matches that traffic as `localhost` (verified with
+  `scripts/diagnose-substitution.sh`; `*.docker.internal` doesn't match either). `--host` takes no
+  port, `--env` must be `^[A-Z_][A-Z0-9_]*$`.
 - The flag is `--host`, not `--target` (`--target` only exists in an old example, docker/sbx-releases#7;
   the first real e2e run failed on it). sbx flag names have churned - prefer a real invocation from
   an issue or `sbx <cmd> --help` output over doc summaries.

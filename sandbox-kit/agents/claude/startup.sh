@@ -29,7 +29,7 @@
 # via POST /api/sandboxes/<name>/register to skip the one-retry round trip.
 set -e
 export PATH="$HOME/.local/bin:$HOME/.claude/local:$PATH"
-DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-daemon.internal}"
+DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-host.docker.internal}"
 DAEMON_PORT="${GOVERSBX_DAEMON_PORT:-8787}"
 SANDBOX_IDENTITY_PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 claude mcp add goversbx-network "http://${DAEMON_HOST}:${DAEMON_PORT}/mcp" \

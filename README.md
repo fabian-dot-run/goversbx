@@ -77,7 +77,9 @@ and never read from a per-sandbox env var (see `docs/plan.md`'s third 2026-10-14
 a hardcoded literal, not an env-var lookup, is the whole point). The first time the daemon sees
 that literal arrive unsubstituted from some sandbox, it automatically lists every running sandbox
 (`sbx ls`) and registers any it doesn't know about yet via `sbx secret set-custom --host
-daemon.internal --value <name>`, then asks the agent to retry. From then on, the sbx proxy rewrites
+localhost --value <name>`, then asks the agent to retry. (`localhost`, not `host.docker.internal`:
+sandboxes reach the daemon at `host.docker.internal:8787`, but the sbx proxy matches that traffic as
+`localhost` - verified with `scripts/diagnose-substitution.sh`.) From then on, the sbx proxy rewrites
 the placeholder to that sandbox's real name on every outbound header to the daemon - the sandbox
 itself never sees or controls the real value. No operator action is required for this to happen.
 

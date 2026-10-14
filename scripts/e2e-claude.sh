@@ -27,15 +27,14 @@
 #   GOVERSBX_SANDBOX_API_PORT/GOVERSBX_ADMIN_PORT   daemon ports (default 8787/8788)
 #   SBX=sbx                          sbx binary
 #   SANDBOX_DAEMON_HOST=host.docker.internal   how the sandbox reaches the host
+#   IDENTITY_TARGET_HOST=localhost             set-custom --host (how the proxy sees that host)
 #   CLAUDE_TIMEOUT=300               seconds to wait for `claude -p`
 #
-# Assumptions from sbx release notes/docs, not yet run against a real sbx host - if one of these is
-# wrong, the step that depends on it fails with the sbx output shown:
-#   `sbx create --name N claude DIR`, `sbx exec [-e K=V] N CMD...`, `sbx rm --force N`,
-#   `sbx policy allow network PATTERN --sandbox N`, `sbx policy ls N`, `sbx ls --format json`.
-# The script's own mechanics were smoke-tested inside a sandbox against a stub `sbx` that simulates
-# proxy substitution (happy path and the no-substitution failure path), and the Claude step's
-# prompt/--allowedTools against a local daemon - see docs/status.md.
+# Confirmed on a real host (sbx v0.48.0): `sbx create --name N claude [DIR]`, `sbx exec -e K=V N CMD`,
+# `sbx policy allow network localhost:PORT --sandbox N`, `sbx ls --format json`, `sbx secret
+# set-custom --sandbox N --host H --env UPPER_NAME --placeholder P --value V` (no port in --host),
+# substitution only with `--host localhost` for traffic to host.docker.internal. Script mechanics are
+# also checkable without a host via scripts/testing/fake-sbx - see docs/status.md.
 
 set -u
 
@@ -46,6 +45,9 @@ SANDBOX_NAME="${SANDBOX_NAME:-goversbx-e2e-$(date +%Y%m%d%H%M%S)}"
 SANDBOX_API_PORT="${GOVERSBX_SANDBOX_API_PORT:-8787}"
 ADMIN_PORT="${GOVERSBX_ADMIN_PORT:-8788}"
 SANDBOX_DAEMON_HOST="${SANDBOX_DAEMON_HOST:-host.docker.internal}"
+# The sbx proxy sees sandbox traffic to host.docker.internal as "localhost"; only `set-custom --host
+# localhost` is substituted there (verified with scripts/diagnose-substitution.sh, sbx v0.48.0).
+IDENTITY_TARGET_HOST="${IDENTITY_TARGET_HOST:-localhost}"
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 
@@ -168,7 +170,7 @@ mkdir -p "$WORKSPACE"
   || { cat "$RUN_DIR/build.log"; die "daemon build failed"; }
 GOVERSBX_SBX_DRY_RUN=false \
 GOVERSBX_SBX_BINARY="$SBX" \
-GOVERSBX_IDENTITY_TARGET_HOST="$SANDBOX_DAEMON_HOST" \
+GOVERSBX_IDENTITY_TARGET_HOST="$IDENTITY_TARGET_HOST" \
 GOVERSBX_IDENTITY_SANDBOX_PATTERN="$SANDBOX_NAME(-b)?" \
 GOVERSBX_SANDBOX_API_PORT="$SANDBOX_API_PORT" \
 GOVERSBX_ADMIN_PORT="$ADMIN_PORT" \
@@ -294,7 +296,7 @@ if req="$(wait_for_pending "$TARGET_HOST" 45)"; then
   check_approval "$(approve "$(echo "$req" | jq -r '.id')")" "$TARGET_HOST" "curl agent"
 else
   fail "no pending request for $TARGET_HOST within 45s - most likely the placeholder is not being substituted"
-  info "check: $SBX secret ls ; daemon log $DAEMON_LOG ; target host must be $SANDBOX_DAEMON_HOST"
+  info "check: $SBX secret ls ; daemon log $DAEMON_LOG ; sbx secret ls --sandbox $SANDBOX_NAME should list TARGETS $IDENTITY_TARGET_HOST"
 fi
 wait "$SECOND_PID" 2>/dev/null
 second="$(cat "$RUN_DIR/second-call.txt")"

@@ -22,7 +22,7 @@
 # - omp is a Bun app, so Node may not exist in an omp sandbox: the merge runs with node if present,
 #   otherwise bun.
 set -e
-DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-daemon.internal}"
+DAEMON_HOST="${GOVERSBX_DAEMON_HOST:-host.docker.internal}"
 DAEMON_PORT="${GOVERSBX_DAEMON_PORT:-8787}"
 SANDBOX_IDENTITY_PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
