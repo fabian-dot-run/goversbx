@@ -1,11 +1,20 @@
 package run.fabian.daemon;
 
-import run.fabian.daemon.http.AdminServer;
-import run.fabian.daemon.http.SandboxApiServer;
-import run.fabian.daemon.sbx.SbxPolicyClient;
-import run.fabian.daemon.store.RequestStore;
+import run.fabian.daemon.mcp.McpContext;
+import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestRepository;
+import run.fabian.daemon.networkaccess.adapter.sbx.SbxCliPolicyAdapter;
+import run.fabian.daemon.networkaccess.adapter.web.AdminApiController;
+import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
+import run.fabian.daemon.networkaccess.application.NetworkAccessService;
+import run.fabian.daemon.networkaccess.application.port.RequestRepository;
+import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
+import io.javalin.Javalin;
+import io.javalin.json.JavalinJackson;
+import org.eclipse.jetty.servlet.ServletHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 public final class Main {
 
@@ -18,16 +27,25 @@ public final class Main {
         String sbxBinary = env("GOVERSBX_SBX_BINARY", "sbx");
         boolean dryRun = Boolean.parseBoolean(env("GOVERSBX_SBX_DRY_RUN", "true"));
 
-        RequestStore store = new RequestStore();
-        SbxPolicyClient sbxPolicyClient = new SbxPolicyClient(sbxBinary, dryRun);
+        RequestRepository repository = new InMemoryRequestRepository();
+        SbxPolicyPort sbxPolicyPort = new SbxCliPolicyAdapter(sbxBinary, dryRun);
+        NetworkAccessService networkAccessService = new NetworkAccessService(repository, sbxPolicyPort);
 
-        SandboxApiServer sandboxApiServer = new SandboxApiServer(store);
-        AdminServer adminServer = new AdminServer(store, sbxPolicyClient);
+        McpContext mcp = McpContext.build(networkAccessService);
 
-        sandboxApiServer.start(sandboxApiBind, sandboxApiPort);
-        log.info("Sandbox-facing API listening on {}:{}", sandboxApiBind, sandboxApiPort);
+        Javalin sandboxApp = Javalin.create(config ->
+                config.jetty.modifyServletContextHandler(handler ->
+                        handler.addServlet(new ServletHolder(mcp.servlet()), "/mcp/*")));
+        sandboxApp.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
+        sandboxApp.start(sandboxApiBind, sandboxApiPort);
+        log.info("Sandbox-facing MCP endpoint listening on {}:{}/mcp", sandboxApiBind, sandboxApiPort);
 
-        adminServer.start("127.0.0.1", adminPort);
+        Javalin adminApp = Javalin.create(config -> {
+            config.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false));
+            config.staticFiles.add("/public");
+        });
+        new AdminApiController(networkAccessService).registerRoutes(adminApp);
+        adminApp.start("127.0.0.1", adminPort);
         log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only)", adminPort);
 
         if (dryRun) {
@@ -35,8 +53,9 @@ public final class Main {
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            sandboxApiServer.stop();
-            adminServer.stop();
+            mcp.close();
+            sandboxApp.stop();
+            adminApp.stop();
         }));
     }
 

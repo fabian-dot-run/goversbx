@@ -1,21 +1,17 @@
 # AGENTS.md
 
 Guidance for AI coding agents working in this repository. See `README.md` for what the project
-does and `docs/plan.md` for the full design rationale, open questions, and milestone status.
+does and `docs/plan.md` for the full design rationale, open questions, and milestone status
+(including the 2026-10-14 revision that merged the MCP server into the daemon).
 
 ## Build & run
 
 ```bash
-./gradlew build -x test              # build everything
+./gradlew build                      # build everything, run the full test suite
+./gradlew :daemon:test               # unit + fast integration tests only
 ./gradlew :daemon:shadowJar          # build the daemon fat jar
-./gradlew :mcp-server:shadowJar      # build the mcp-server fat jar
 ./gradlew :sandbox-kit:packageKit    # build the sandbox customization zip
 ```
-
-There are no JUnit tests yet — verification so far has been manual (curl against the daemon's
-REST API, and a Python-driven MCP JSON-RPC stdio session against the mcp-server jar; see
-`docs/plan.md` "Verification" / "Status"). If you add real behavior, prefer adding a JUnit 5 test
-under the relevant module's `src/test/java` over another manual script.
 
 ### JDK/Gradle quirks (don't "fix" these without reason)
 
@@ -33,49 +29,107 @@ under the relevant module's `src/test/java` over another manual script.
   Gradle (8.11 and earlier tested) fails to even configure a Kotlin DSL build script on newer JDKs
   — its embedded Kotlin compiler can't parse a JDK version string like `25.0.4.1`. If you bump the
   JDK running Gradle, check this still works before assuming it's fine.
+- `junit-jupiter` alone is not enough for Gradle 9's test task to find JUnit 5 tests - it also
+  needs `org.junit.platform:junit-platform-launcher` on `testRuntimeOnly`
+  (`daemon/build.gradle.kts`). Without it, `./gradlew :daemon:test` fails with "Could not load
+  JUnit Platform" rather than just finding zero tests, which is a confusing failure mode if you
+  ever strip this dependency while "cleaning up" the build file.
 
-## Module conventions
+## Bounded contexts and hexagonal layering (`daemon` module)
 
-- `common` has **no I/O dependencies** beyond Jackson for JSON. It's shared by both the sandbox
-  side (`mcp-server`) and the host side (`daemon`) — don't add anything here that only makes sense
-  on one side (e.g. Javalin, `ProcessBuilder` calls, the MCP SDK).
-- `daemon` runs **two separate Javalin instances** in one process on purpose
-  (`SandboxApiServer` on 8787, `AdminServer` on 127.0.0.1:8788). This is a security boundary, not
-  an accident: the sandbox-facing port must never expose approve/deny, because there's no authn in
-  this MVP and a sandbox could otherwise self-approve its own requests. If you add a new endpoint,
-  think about which of the two servers it belongs on before adding it, and don't merge them into
-  one listener to "simplify" it.
-- `mcp-server` talks to the MCP SDK over **stdio**. `System.out` is reserved for JSON-RPC frames —
-  never write anything to stdout; use the SLF4J logger (goes to stderr) for all diagnostics. This
-  will silently corrupt the protocol stream if violated, not throw an obvious exception.
-- `SbxPolicyClient` defaults to `GOVERSBX_SBX_DRY_RUN=true` (logs the command it would run instead
-  of executing it). Don't flip this default — real sandboxes get their network policy changed by
-  this call, and flipping the default would make every local/dev run of the daemon start mutating
-  real `sbx` policy.
+The daemon is the **only** deployable now (there used to be a separate `mcp-server` process and a
+shared `common` module - both were folded in here; see `docs/plan.md`'s 2026-10-14 revision for
+why). Internally it is split into two bounded contexts under
+`daemon/src/main/java/run/fabian/daemon/`:
+
+- **`networkaccess`** - the approval workflow. Layered `domain` → `application` (+ `port`) →
+  `adapter`, with a published `api` package (`NetworkAccessApi`, `NetworkAccessRequestView`,
+  `RequestStatus`).
+- **`mcp`** - pure MCP-protocol translation. Has no domain of its own by design - it only adapts
+  MCP tool calls into calls on `networkaccess.api`.
+
+**The rule**: `mcp` must never import `networkaccess.domain`, `.application`, or `.adapter`
+directly - only `networkaccess.api`. This is enforced by convention/code review, not by the Java
+module system (JPMS would be real overkill here given Jetty/Reactor aren't cleanly modularized).
+If you add a third concern to this daemon, give it the same shape: its own package, talking to
+`networkaccess` only through `networkaccess.api`, never reaching into its internals.
+
+Within `networkaccess`: `domain` has zero framework dependencies (no Javalin, no Jetty, no MCP
+SDK, no `ProcessBuilder`) and owns its own invariants - e.g. `NetworkAccessRequest.approve()`/
+`.deny()` throw `AlreadyDecidedException` themselves rather than callers re-checking status first.
+`application` (`NetworkAccessService`) orchestrates the domain through driven ports
+(`RequestRepository`, `SbxPolicyPort`) it doesn't know the implementation of. `adapter` implements
+those ports (`adapter.persistence`, `adapter.sbx`) and hosts the driving HTTP adapter
+(`adapter.web.AdminApiController`).
+
+- **Two separate Javalin instances in one process, on purpose** (`Main.java`): one hosts only the
+  mounted MCP servlet + `/api/health` on the sandbox-facing port (`GOVERSBX_SANDBOX_API_PORT`,
+  default 8787); the other hosts the admin REST API + static web UI, bound to `127.0.0.1` only
+  (`GOVERSBX_ADMIN_PORT`, default 8788). This is a security boundary, not an accident: there's no
+  authn in this MVP, and a sandbox must never be able to reach the approve/deny endpoints. If you
+  add a new endpoint, think about which of the two it belongs on before adding it, and don't merge
+  them into one listener to "simplify" it.
+- `SbxCliPolicyAdapter` defaults to `GOVERSBX_SBX_DRY_RUN=true` (logs the command it would run
+  instead of executing it). Don't flip this default - real sandboxes get their network policy
+  changed by this call.
+- Sandbox identity travels as an HTTP header (`X-Goversbx-Sandbox-Name`, see `McpContext`'s
+  `contextExtractor`), read by the mcp tool handlers via
+  `exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY)` - there is no more
+  per-process `$SANDBOX_NAME` env var now that one daemon process serves every sandbox. This is
+  exactly as trustworthy as the old env-var approach (a static value baked in once by the kit's
+  startup script, not independently verified) - see `docs/plan.md` open question 3 before treating
+  it as more secure than that.
+
+## Testing conventions
+
+- Unit tests (`networkaccess/domain`, `networkaccess/application`): plain JUnit 5, no Javalin/Jetty
+  involved. Use the real `InMemoryRequestRepository` as a fast, correct test double rather than
+  mocking the repository port.
+- Fast integration tests (`networkaccess/adapter/web`, `mcp`): use `io.javalin.testtools
+  .JavalinTest.test(app, (server, client) -> {...})` - boots the real app on an ephemeral port,
+  tears down automatically. For the MCP endpoint specifically, drive it with the MCP Java SDK's
+  own sync client (`McpClient.sync(HttpClientStreamableHttpTransport.builder(origin + "/mcp")
+  .build()).build()`) against `client.getOrigin()` rather than hand-rolling JSON-RPC - see
+  `McpEndpointIntegrationTest` for the pattern, including how to exercise "a human approves while
+  the tool call is blocked" by calling `NetworkAccessService` directly from a background thread in
+  the same JVM.
+- The `javalin-testtools` artifact version must track the `javalin` version exactly
+  (`gradle/libs.versions.toml`) - they're versioned in lockstep by upstream.
 
 ## MCP Java SDK notes
 
 Pinned at `2.0.1` (`gradle/libs.versions.toml`, `mcp-sdk`). This SDK is young and its API has
-churned across versions. If you bump it:
+churned across versions; verify against the actual jar with `javap` rather than assuming method
+names from memory if you bump it (`mcp-core-<version>.jar` can be pulled straight from Maven
+Central).
+
+- **Transport: HTTP (Streamable), not stdio.** `McpContext.build(...)` constructs an
+  `HttpServletStreamableServerTransportProvider` (it literally **is** a `jakarta.servlet
+  .http.HttpServlet`) and mounts it onto the sandbox-facing Javalin instance's own Jetty server via
+  `config.jetty.modifyServletContextHandler(handler -> handler.addServlet(new
+  ServletHolder(mcp.servlet()), "/mcp/*"))` - no second web server, no Spring. This mirrors how the
+  platform's own `mcp-gateway` is registered (`claude mcp add ... --transport http`), which is the
+  whole reason this was moved out of a separate stdio process in the first place (see
+  `docs/plan.md`'s 2026-10-14 revision).
 - The artifact `io.modelcontextprotocol.sdk:mcp` is just a thin aggregator POM pulling in
   `mcp-core` (the actual classes) and `mcp-json-jackson3` (the default JSON mapper
   implementation, using `tools.jackson.*` — Jackson 3, **not** the classic `com.fasterxml.jackson`
-  used by `common`/`daemon`/the mcp-server's own `DaemonClient`; these are two unrelated Jackson
-  majors living in the same classpath on purpose, don't try to unify them).
-- There is no SDK-wide "default JSON mapper" static accessor. `Main.java` constructs one
-  explicitly via `new JacksonMcpJsonMapperSupplier().get()`. If a future SDK version adds a real
-  default accessor, feel free to simplify to that — but verify it first with `javap` against the
-  actual jar rather than assuming method names from memory; this SDK's class/builder names moved
-  around enough between versions that guessing is a bad bet. (`mcp-core-<version>.jar` can be
-  pulled straight from Maven Central and inspected with `javap -classpath <jar> <class>`.)
-- `StdioServerTransportProvider` requires an `McpJsonMapper` in its constructor — it is not
-  injected later by `McpServer.sync(...)`'s builder.
+  used by `networkaccess.adapter.web.JsonSupport`; these are two unrelated Jackson majors living in
+  the same classpath on purpose, don't try to unify them).
+- There is no SDK-wide "default JSON mapper" static accessor. `McpContext` constructs one
+  explicitly via `new JacksonMcpJsonMapperSupplier().get()`.
+- A tool handler reads per-request context (like the sandbox-name header) via
+  `McpSyncServerExchange.transportContext()`, populated by the `McpTransportContextExtractor`
+  passed to the transport provider's builder - this is how request-scoped data gets into a tool
+  call now that there's no per-process env var to read.
 
 ## Sandbox-kit caveat
 
 Everything under `sandbox-kit/startup/` is an explicitly-marked **draft**: it mirrors the
 in-sandbox *consumption* shape observed on a running `sbx` sandbox (durable-startup command
-format, `claude mcp add` registration, `~/.claude/skills/synced/` layout), but the host-side
-mechanism for actually registering a new kit/skill bucket with `sbx` has not been confirmed. Don't
-remove the "DRAFT" markers or treat these files as settled without checking against real `sbx`
-docs/source first (see `docs/plan.md`, open question 2 / milestone M4).
+format, `claude mcp add --transport http` registration, `~/.claude/skills/synced/` layout), but
+the host-side mechanism for actually registering a new kit/skill bucket with `sbx` has not been
+confirmed. Don't remove the "DRAFT" markers or treat these files as settled without checking
+against real `sbx` docs/source first (see `docs/plan.md`, open question 2 / milestone M4). There is
+no jar or launcher script to package anymore - `sandbox-kit/build.gradle.kts`'s `packageKit` task
+only bundles `skill/` and `startup/`.

@@ -139,8 +139,9 @@ web UI (8788, loopback) → clicks Approve → daemon runs `sbx policy allow net
 
 Revocation/expiry of approvals; re-request suppression for previously-denied hosts; authn/authz on
 the daemon (mitigated only by loopback-binding the admin server); verifying a claimed
-`sandboxName` actually corresponds to a live sandbox; multi-daemon HA; durable/crash-surviving
-audit log; propagating a deny *reason* back to the agent; TLS between mcp-server and daemon.
+`sandboxName` actually corresponds to the sandbox that sent it (known risk, see open question 3);
+multi-daemon HA; durable/crash-surviving audit log; propagating a deny *reason* back to the agent;
+TLS between mcp-server and daemon.
 
 ### 8. Milestones
 
@@ -179,12 +180,39 @@ audit log; propagating a deny *reason* back to the agent; TLS between mcp-server
    `SandboxApiServer` must bind to for "always allow-listed" to actually work globally.
 2. Host-side mechanism to author a new kit/skill bucket so it's baked into new sandboxes — hard
    checkpoint before M4.
-3. Whether the daemon should independently verify `sandboxName` against a live `sbx` inventory
-   rather than trusting the value the mcp-server sends.
+3. **Known risk, accepted for the MVP: sandbox identity is not verified.** *(Carried forward in a
+   new shape by the 2026-10-14 revision below — still open, not resolved.)* The daemon trusts
+   whatever `sandboxName` the mcp-server sends with a request - there is no independent check
+   against a live `sbx` inventory. This is not just a stdio-transport quirk (open question 5) -
+   the same problem would resurface under an HTTP-transport design (see below), because in either
+   case identity is established by *something baked into the sandbox at kit-install time*
+   (an env var, or a static bearer header), and anything living inside the sandbox's own
+   filesystem/config is something the agent could in principle read, copy, or tamper with. The
+   robust fix is for identity to be established by the network/proxy layer instead - the same
+   sandbox-to-daemon connection should carry proof of origin that the proxy attaches and the
+   sandbox cannot forge, mirroring how the already-registered `mcp-gateway` server's
+   `"Authorization": "Bearer proxy-managed"` header looks like a placeholder the sbx egress proxy
+   rewrites per-request with a real, per-sandbox credential as the request leaves the sandbox
+   (the same proxy already injects GitHub credentials this way for git operations - see this
+   environment's own "Git Authentication" docs). Whether the sbx proxy can do this for an
+   arbitrary self-hosted service like ours is unconfirmed and would need to be checked against
+   real `sbx` docs/source, same as open question 2. Until then: a sandbox could falsely claim
+   another sandbox's name and get that sandbox's host approved instead of its own. Low severity
+   for now since approvals are already visible to a human in the UI (sandbox name included), but
+   worth fixing before this goes beyond a single trusted operator's own use.
 4. Pin an exact MCP Java SDK version before M3 and verify builder/tool-spec class names against
    its javadoc (pre-1.0, API has churned).
-5. Whether `claude mcp add --scope user` gives the spawned stdio process a fixed environment or
-   lets it inherit the agent's shell env — affects whether `$SANDBOX_NAME` is tamper-resistant.
+5. *(Superseded by the 2026-10-14 revision - there is no more spawned stdio process at all.)*
+   ~~Whether `claude mcp add --scope user` gives the spawned stdio process a fixed environment or
+   lets it inherit the agent's shell env — affects whether `$SANDBOX_NAME` is tamper-resistant.~~
+   The question moved: see the revision section for the new HTTP-header equivalent of this same
+   risk.
+6. *(Acted on by the 2026-10-14 revision below.)* Whether `mcp-server` should even be a process
+   that runs inside the sandbox at all. The precedent we found (`mcp-gateway`) is registered via
+   `--transport http` against an internal hostname, not spawned locally via stdio - i.e. the real
+   MCP server for that tool does not run inside the container. Moving `goversbx-network` to the
+   same shape was not pursued immediately when this question was first raised, but was done in the
+   following revision once the user asked for it explicitly.
 
 ## Verification
 
@@ -216,6 +244,63 @@ M5 (real `sbx policy allow` call against a live sandbox, resolving open question
 
 Pinned MCP Java SDK version: `2.0.1` (resolves open question 4). Its API is split across
 `mcp-core` + `mcp-json-jackson3`, pulled transitively via the `io.modelcontextprotocol.sdk:mcp`
-aggregator artifact; `mcp-server/src/main/java/run/fabian/mcpserver/Main.java` constructs the
-`McpJsonMapper` explicitly via `JacksonMcpJsonMapperSupplier` rather than relying on an SDK-wide
-default (none was found on this SDK version).
+aggregator artifact; `McpContext` (see revision below) constructs the `McpJsonMapper` explicitly
+via `JacksonMcpJsonMapperSupplier` rather than relying on an SDK-wide default (none was found on
+this SDK version).
+
+## Revision (2026-10-14): merge the MCP server into the daemon
+
+Prompted by the user asking, essentially, "does the MCP server actually need to run inside the
+container?" - it doesn't, and open question 6 above had already flagged why: the real precedent
+(`mcp-gateway`) is registered via `--transport http` against an internal hostname, not spawned
+locally. This revision acts on that: `mcp-server` and `common` are gone as separate Gradle modules;
+everything lives in `daemon` now, split into two **bounded contexts**
+(`run.fabian.daemon.networkaccess` and `run.fabian.daemon.mcp`) that only talk to each other
+through one published `networkaccess.api` package, each internally structured along
+domain → application/ports → adapters lines. See `AGENTS.md` for the convention in detail.
+
+What changed mechanically:
+- `mcp-server`'s stdio transport is replaced by `io.modelcontextprotocol.server.transport
+  .HttpServletStreamableServerTransportProvider`, mounted directly onto the sandbox-facing
+  Javalin instance's Jetty server (`config.jetty.modifyServletContextHandler(...)`) at `/mcp` -
+  confirmed working via `javap` against the real jars before writing any code, and now covered by
+  an automated integration test (`McpEndpointIntegrationTest`) that drives it with the MCP Java
+  SDK's own sync client.
+- The old sandbox-facing REST API (`/api/requests` on port 8787) is deleted entirely - nothing
+  calls it anymore, since the `mcp` bounded context now calls `networkaccess.api.NetworkAccessApi`
+  as a plain in-process Java method call instead of over HTTP. `DaemonClient` (the old HTTP client
+  side of that call) is gone, and so is the client/server timeout-duplication concern it used to
+  need bounded-long-poll logic to work around.
+- `sandbox-kit` shrinks to just `SKILL.md` + a durable-startup draft; no jar, no launcher script.
+  The draft now registers via
+  `claude mcp add goversbx-network "http://daemon.internal:8787/mcp" --transport http --header "X-Goversbx-Sandbox-Name: $SANDBOX_NAME" --scope user`.
+
+**Open question 3 (sandbox identity), new shape - still not fixed, as intentionally decided by the
+user ("als bekanntes Risiko dokumentieren"):** there is no more per-process `$SANDBOX_NAME` env var
+now that one daemon process serves every sandbox's MCP calls, so identity now travels as the
+`X-Goversbx-Sandbox-Name` HTTP header instead, read via a
+`McpTransportContextExtractor<HttpServletRequest>` into `McpSyncServerExchange.transportContext()`.
+This is exactly as trustworthy as the old env-var approach - a static value baked in once by the
+kit's startup script, not independently verified by the daemon - confirmed by design, not an
+oversight: moving to HTTP transport does not by itself change who can forge the value, only where
+it travels. The robust fix (identity attached by the network/proxy layer, unforgeable by the
+sandbox itself) remains unimplemented and would need the same host-side `sbx` verification as
+before.
+
+**A stronger fix was discussed but deliberately not implemented this round**: inject a
+per-sandbox secret via the already-documented `sbx secret set <name> --sandbox <sandbox> -t
+<token>` mechanism (confirmed real, unlike the proxy-header-rewriting guess from the original open
+question 3) at sandbox-registration time, from an operator-triggered daemon endpoint - the daemon
+would then look up `sandboxName` from the verified token rather than trusting a client-supplied
+value at all. This is a materially better foundation than the current header (the token is minted
+and injected from *outside* the sandbox, by whoever controls `sbx`, rather than baked in by a
+script the sandbox can in principle inspect) but needs a new registration step and confirmation of
+how an `sbx secret set` value actually surfaces inside a sandbox process. Deliberately deferred -
+the user asked to document this as a known risk for now, not fix it.
+
+Verification performed for this revision: `./gradlew :daemon:test` (20 tests: domain invariants,
+application-service behavior including the approve-while-blocked race, admin REST API via
+`javalin-testtools`, and the real MCP HTTP endpoint via the MCP Java SDK's own client) plus a
+manual end-to-end curl session driving the full MCP Streamable HTTP handshake (`initialize` →
+`notifications/initialized` → `tools/call`) with a custom `X-Goversbx-Sandbox-Name` header,
+confirming it arrives correctly in the admin API's view of the resulting request.
