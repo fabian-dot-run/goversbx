@@ -80,9 +80,21 @@ appears without reload, exactly one notification per request (title "<sandbox> w
 reason as body, tag = request id, actions approve/deny, requireInteraction), closed again after the
 approval, request moves to "Decided". Headless Firefox has no OS notification backend
 (`showNotification` -> `NS_ERROR_FAILURE`), so that run recorded the notification calls instead; the
-UI now catches that error and tells the user to check the OS notification settings. Not covered:
-clicking the buttons inside a real macOS notification (`sw.js` posts to the same approve/deny
-endpoints the page uses).
+UI now catches that error and tells the user to check the OS notification settings; a "Send test
+notification" button checks the browser -> OS path on its own.
+
+**Dogfooded in this repo's own sandbox (`claude-goversbx`, 2026-10-14, Firefox on macOS):** asked to
+`curl spiegel.de`, Claude used goversbx on its own (no mention of it in the prompt), requested the
+redirect target `www.spiegel.de` as a second host, got HTTP 200. A later request (`httpbin.org`)
+arrived as a real Firefox notification and was approved from it. Findings:
+- The first attempt showed no notification because the daemon/UI hadn't been restarted yet (old
+  build without the event stream); fine after the restart.
+- `httpbin.org` stayed blocked after the approval: "Blocked by local rule" - a local sbx **deny**
+  rule (probably from a declined sbx approval during earlier diagnostics) wins over goversbx's
+  allow, yet the daemon reported "Approved". Possible follow-up: detect conflicting deny rules after
+  `sbx policy allow` and report them instead of plain "Approved".
+- No "please retry" on the first call after a daemon restart is expected: the sandbox-scoped
+  identity secret lives in sbx and survives the daemon.
 
 **Next steps**: restart the daemon (`scripts/goversbx stop && scripts/goversbx start`), then rerun
 `scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their
