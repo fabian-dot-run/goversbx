@@ -244,9 +244,13 @@ fixed between runs, not yet re-tried for real:
   (a signed, time-limited URL, but a **fixed hostname**, same CDN Gradle's wrapper download used
   earlier in this session - unlike omp's own installer's per-release-random R2 subdomain). Added
   `release-assets.githubusercontent.com` to the script's proactive allow-list too.
-- Re-verified mechanics with `scripts/testing/fake-sbx` after both fixes (real bun+omp install,
-  cleaned up afterward) - passes. **Not yet re-run for real on the host** - that's the immediate
-  next step, then the same for `e2e-pi.sh` and `e2e-opencode.sh`, then step 5 with
+- Run 3 (after that fix): bun itself installed fine this time, but `bun install -g
+  @oh-my-pi/pi-coding-agent` then failed with `GET https://registry.npmjs.org/... - 403` - bun
+  fetches the package from the npm registry same as pi's plain `npm install` does, and that host
+  was only in `e2e-pi.sh`'s allow-list, not `e2e-omp.sh`'s. Added `registry.npmjs.org` there too.
+- Re-verified mechanics with `scripts/testing/fake-sbx` after all three fixes (real bun+omp install,
+  cleaned up afterward each time) - passes. **Not yet re-run for real on the host** - that's the
+  immediate next step, then the same for `e2e-pi.sh` and `e2e-opencode.sh`, then step 5 with
   `ANTHROPIC_API_KEY` for the actual autonomous-tool-use proof.
 
 ## Paused: nested sbx dev sandbox (2026-10-14)

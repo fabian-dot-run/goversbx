@@ -234,20 +234,22 @@ fi
 # the kit's own MCP merge script (which prefers node, falls back to bun, else skips). The omp kit's
 # permissions.network.allow only covers the daemon host, not general internet access - whatever the
 # sandbox's default sbx policy doesn't already allow (e.g. a fresh deny-all/balanced host) has to be
-# granted explicitly here, same fallback pattern as step 3's daemon-reachability check. bun's
-# installer resolves github.com/oven-sh/bun/releases/..., which redirects through github.com's own
-# release-asset CDN at release-assets.githubusercontent.com (confirmed with a real `curl -L`; a
-# fixed, non-randomized host, unlike omp's own installer's per-release R2 subdomain - see the
-# comment above). If GitHub changes that CDN host again, the failure below names the sandbox so you
-# can `sbx policy allow network <host>:443 --sandbox <name>` it and re-run.
+# granted explicitly here, same fallback pattern as step 3's daemon-reachability check. Two hops
+# confirmed for real: bun's installer resolves github.com/oven-sh/bun/releases/..., which redirects
+# through github.com's own release-asset CDN at release-assets.githubusercontent.com (a fixed,
+# non-randomized host, unlike omp's own installer's per-release R2 subdomain - see the comment
+# above); then `bun install -g` itself fetches the package from registry.npmjs.org, same as pi's
+# plain `npm install` (e2e-pi.sh). If any of these CDN hosts change again, the failure below names
+# the sandbox so you can `sbx policy allow network <host>:443 --sandbox <name>` it and re-run.
 for sb in $CREATED_SANDBOXES; do
   "$SBX" policy allow network "bun.sh:443" --sandbox "$sb" >/dev/null 2>&1
   "$SBX" policy allow network "github.com:443" --sandbox "$sb" >/dev/null 2>&1
   "$SBX" policy allow network "release-assets.githubusercontent.com:443" --sandbox "$sb" >/dev/null 2>&1
+  "$SBX" policy allow network "registry.npmjs.org:443" --sandbox "$sb" >/dev/null 2>&1
   if out="$("$SBX" exec "$sb" sh -c 'curl -fsSL https://bun.sh/install | bash && export PATH="$HOME/.bun/bin:$PATH" && bun install -g @oh-my-pi/pi-coding-agent' 2>&1)"; then
     pass "bun + omp installed in $sb"
   else
-    echo "$out"; die "bun/omp install failed in $sb - bun.sh, github.com and release-assets.githubusercontent.com are allowed for $sb, but a release-asset CDN redirect may need yet another host: sbx policy allow network <host>:443 --sandbox $sb, then re-run"
+    echo "$out"; die "bun/omp install failed in $sb - bun.sh, github.com, release-assets.githubusercontent.com and registry.npmjs.org are allowed for $sb, but another CDN redirect may need yet another host: sbx policy allow network <host>:443 --sandbox $sb, then re-run"
   fi
 done
 
