@@ -596,3 +596,11 @@ accepts the mixin, it composes with the built-in `claude` agent (our install com
 claude kit's), the kit's `permissions.network.allow` alone makes the daemon reachable, and the
 install-time `claude mcp add` plus the `files/home/` skill are in place before Claude runs. Open
 question 2 is closed. The mixin's agent-instructions file was not found in the sandbox (harmless).
+
+## Revision (2026-10-14): host launcher `scripts/goversbx`
+
+A kit can't start the daemon (it runs inside the sandbox), so `scripts/goversbx` does it on the
+host: `run` ensures a healthy daemon (building the jar if stale, starting it in the background in
+real mode), then execs `sbx run --kit sandbox-kit/kits/goversbx-<kit> ...`; `start|stop|status|logs`
+manage it. The daemon deliberately outlives the session because it serves every sandbox. For an
+existing sandbox `--kit` is left out (`sbx kit add` covers that case).

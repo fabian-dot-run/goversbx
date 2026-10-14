@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# Host-side launcher: makes sure the goversbx daemon is running, then starts a sandbox with the
+# goversbx kit. A kit can't do this itself - kit hooks run inside the sandbox, the daemon needs the
+# host's sbx CLI and must stay outside the sandbox's control.
+#
+#   scripts/goversbx run [--goversbx-kit claude|pi|omp] [sbx run args...]
+#       Starts the daemon if it isn't running, then `sbx run --kit <kit> <args...>`.
+#       Examples:  scripts/goversbx run claude ~/my-project
+#                  scripts/goversbx run --name my-sb claude ~/my-project
+#                  scripts/goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
+#       --kit is only added for a NEW sandbox: if the sandbox named by --name (or by the first
+#       positional argument) already exists, the args go to `sbx run` unchanged - add the kit to an
+#       existing sandbox with `sbx kit add` instead.
+#   scripts/goversbx start     start the daemon in the background (no-op if already running)
+#   scripts/goversbx stop      stop a daemon started by this script
+#   scripts/goversbx status    daemon state, ports, log location
+#   scripts/goversbx logs      follow the daemon log
+#
+# The daemon keeps running after the sandbox session ends - it serves every sandbox; stop it with
+# `scripts/goversbx stop`. It runs for real (GOVERSBX_SBX_DRY_RUN=false) unless you set that
+# yourself; every other GOVERSBX_* variable is passed through to it (see README). The jar is
+# (re)built with Gradle when it is missing or older than daemon/ sources.
+#
+# Knobs: SBX=sbx, GOVERSBX_KIT=claude (default kit), GOVERSBX_STATE_DIR=~/.local/state/goversbx
+# (pid file + daemon.log), GOVERSBX_SANDBOX_API_PORT=8787, GOVERSBX_ADMIN_PORT=8788.
+# Needs: sbx, java (21+), curl. bash 3.2 compatible (macOS).
+
+set -u
+
+SBX="${SBX:-sbx}"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+JAR="$REPO_DIR/daemon/build/libs/goversbx-daemon.jar"
+STATE_DIR="${GOVERSBX_STATE_DIR:-$HOME/.local/state/goversbx}"
+PID_FILE="$STATE_DIR/daemon.pid"
+LOG_FILE="$STATE_DIR/daemon.log"
+SANDBOX_API_PORT="${GOVERSBX_SANDBOX_API_PORT:-8787}"
+ADMIN_PORT="${GOVERSBX_ADMIN_PORT:-8788}"
+ADMIN="http://127.0.0.1:$ADMIN_PORT"
+
+say() { printf 'goversbx: %s\n' "$*" >&2; }
+die() { say "$*"; exit 1; }
+
+daemon_pid() { # prints the pid of a daemon started by this script, if it is still alive
+  local pid
+  [ -f "$PID_FILE" ] || return 1
+  pid="$(cat "$PID_FILE")"
+  kill -0 "$pid" 2>/dev/null && { echo "$pid"; return 0; }
+  rm -f "$PID_FILE"; return 1
+}
+
+healthy() {
+  curl -s --max-time 2 "$ADMIN/api/health" 2>/dev/null | grep -q '"ok"' \
+    && curl -s --max-time 2 "http://127.0.0.1:$SANDBOX_API_PORT/api/health" 2>/dev/null | grep -q '"ok"'
+}
+
+port_taken() { curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$1/"; }
+
+build_if_needed() {
+  if [ -f "$JAR" ] && [ -z "$(find "$REPO_DIR/daemon/src" "$REPO_DIR/daemon/build.gradle.kts" -newer "$JAR" -print -quit)" ]; then
+    return 0
+  fi
+  say "building the daemon jar ..."
+  (cd "$REPO_DIR" && ./gradlew -q :daemon:shadowJar) >"$STATE_DIR/build.log" 2>&1 \
+    || { cat "$STATE_DIR/build.log" >&2; die "daemon build failed (log: $STATE_DIR/build.log)"; }
+}
+
+start_daemon() {
+  local pid
+  mkdir -p "$STATE_DIR"
+  if healthy; then
+    pid="$(daemon_pid)" && say "daemon already running (pid $pid), admin UI $ADMIN" \
+      || say "daemon already running (not started by this script), admin UI $ADMIN"
+    return 0
+  fi
+  for port in "$SANDBOX_API_PORT" "$ADMIN_PORT"; do
+    port_taken "$port" && die "port $port is in use by something that isn't a healthy goversbx daemon"
+  done
+  command -v java >/dev/null 2>&1 || die "java not found on PATH (JDK 21+ needed)"
+  command -v "$SBX" >/dev/null 2>&1 || die "'$SBX' not found on PATH"
+  build_if_needed
+  GOVERSBX_SBX_DRY_RUN="${GOVERSBX_SBX_DRY_RUN:-false}" \
+  GOVERSBX_SBX_BINARY="${GOVERSBX_SBX_BINARY:-$SBX}" \
+    nohup java -jar "$JAR" >>"$LOG_FILE" 2>&1 </dev/null &
+  pid=$!
+  echo "$pid" >"$PID_FILE"
+  for _ in $(seq 1 30); do
+    healthy && { say "daemon started (pid $pid), admin UI $ADMIN, log $LOG_FILE"; return 0; }
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  tail -20 "$LOG_FILE" >&2
+  kill "$pid" 2>/dev/null; rm -f "$PID_FILE"
+  die "daemon did not come up (log: $LOG_FILE)"
+}
+
+stop_daemon() {
+  local pid
+  if pid="$(daemon_pid)"; then
+    kill "$pid"
+    for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    rm -f "$PID_FILE"
+    say "daemon stopped (pid $pid)"
+  elif healthy; then
+    die "a daemon is running on $ADMIN but wasn't started by this script - stop it where it was started"
+  else
+    say "daemon not running"
+  fi
+}
+
+sandbox_exists() { # $1 = name
+  "$SBX" ls --format json 2>/dev/null | grep -q "\"name\": *\"$1\""
+}
+
+# Name of the sandbox `sbx run <args>` refers to: the value of --name, else the first positional arg.
+target_sandbox() {
+  local first=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name) echo "${2:-}"; return ;;
+      --name=*) echo "${1#--name=}"; return ;;
+      -*) ;;
+      *) [ -z "$first" ] && first="$1" ;;
+    esac
+    shift
+  done
+  echo "$first"
+}
+
+run_sandbox() {
+  local kit="${GOVERSBX_KIT:-claude}" kit_dir target
+  if [ "${1:-}" = --goversbx-kit ]; then kit="${2:?--goversbx-kit needs claude, pi or omp}"; shift 2; fi
+  kit_dir="$REPO_DIR/sandbox-kit/kits/goversbx-$kit"
+  [ -f "$kit_dir/spec.yaml" ] || die "unknown kit '$kit' (no $kit_dir/spec.yaml)"
+  [ $# -gt 0 ] || die "usage: scripts/goversbx run [--goversbx-kit claude|pi|omp] [sbx run args...]  e.g. run claude ~/my-project"
+
+  start_daemon || exit 1
+
+  target="$(target_sandbox "$@")"
+  if [ -n "$target" ] && sandbox_exists "$target"; then
+    say "sandbox $target already exists - starting it without --kit (use 'sbx kit add' to add the kit)"
+    exec "$SBX" run "$@"
+  fi
+  if [ "$SANDBOX_API_PORT" = 8787 ]; then
+    exec "$SBX" run --kit "$kit_dir" "$@"
+  fi
+  exec "$SBX" run --kit "$kit_dir" --kit-arg "goversbx-$kit.daemonPort=$SANDBOX_API_PORT" "$@"
+}
+
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  run) run_sandbox "$@" ;;
+  start) start_daemon ;;
+  stop) stop_daemon ;;
+  status)
+    if healthy; then
+      pid="$(daemon_pid)" || pid="unknown (not started by this script)"
+      echo "running, pid $pid"
+    else
+      echo "not running"
+    fi
+    echo "admin UI: $ADMIN   sandbox port: $SANDBOX_API_PORT   log: $LOG_FILE" ;;
+  logs) exec tail -f "$LOG_FILE" ;;
+  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 1 ;;
+esac

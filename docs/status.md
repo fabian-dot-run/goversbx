@@ -45,10 +45,14 @@ Not found: the mixin's `agentInstructions` file (the script's search for "govers
 sbx writes mixin kits-memory is still unknown.
 
 The daemon itself can't be started by a kit (kit hooks run inside the sandbox; the daemon needs the
-host's `sbx` CLI and must stay outside the sandbox's control). A host-side wrapper that starts the
-daemon if needed and then runs `sbx run --kit ...` is a possible next step.
+host's `sbx` CLI and must stay outside the sandbox's control). Instead, the host launcher
+`scripts/goversbx run [--goversbx-kit claude|pi|omp] <sbx run args>` starts the daemon in the
+background if needed (builds the jar when stale, real mode, `~/.local/state/goversbx/`), then execs
+`sbx run --kit ...`; `start|stop|status|logs` manage the daemon. Checked here against `fake-sbx`
+(new/existing sandbox, pi kit, non-default port -> `--kit-arg`, foreign process on the port); **not
+yet run on the host** - it relies on `sbx run` accepting `--kit` like `sbx create` does.
 
-**Next steps**: optional host wrapper (start daemon + `sbx run --kit`); pi/oh-my-pi end to end (their
+**Next steps**: try `scripts/goversbx run claude <ws>` on the host; pi/oh-my-pi end to end (their
 kits exist, never applied with real sbx); then the out-of-scope items (persistence, revocation, admin authn).
 
 ### How we got there
@@ -228,7 +232,7 @@ becomes reachable from that sandbox.
 
 ## Backlog (after the Claude MVP works)
 
-- Optional host wrapper that starts the daemon and runs `sbx run --kit ...`; find where mixin agent instructions land.
+- Find where mixin agent instructions land; optionally a launchd agent so the daemon starts at login.
 - Verify oh-my-pi against a real omp install (needs Bun); add opencode (`~/.config/opencode/opencode.json`, `"type": "remote"`).
 - Out of MVP scope so far: revocation/expiry of approvals, persistence, authn on the admin UI
   (currently only protected by loopback binding), audit log, deny reason back to the agent.

@@ -49,6 +49,22 @@ Runs the full test suite too: fast JUnit 5 unit tests for the domain/application
 `javalin-testtools`-backed integration tests that boot the real admin REST API and the real MCP
 HTTP endpoint (driven by the MCP Java SDK's own client) against an ephemeral port.
 
+## Quick start (host)
+
+```bash
+scripts/goversbx run claude ~/my-project        # = start daemon if needed, then sbx run --kit ... claude ~/my-project
+scripts/goversbx run --name my-sb claude ~/my-project
+scripts/goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
+scripts/goversbx status | logs | stop
+```
+
+`scripts/goversbx` builds the jar if it's missing or stale, starts the daemon in the background for
+real (`GOVERSBX_SBX_DRY_RUN=false` unless set; log and pid file in `~/.local/state/goversbx/`), waits
+for both health endpoints, and then hands over to `sbx run --kit sandbox-kit/kits/goversbx-<kit>`.
+The daemon keeps running after the session ends - it serves every sandbox - until
+`scripts/goversbx stop`. For a sandbox that already exists it runs `sbx run` without `--kit`
+(add the kit with `sbx kit add`). All other `GOVERSBX_*` variables below pass through.
+
 ## Running the daemon
 
 ```bash

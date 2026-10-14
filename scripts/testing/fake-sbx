@@ -15,7 +15,9 @@ STATE="${FAKE_SBX_STATE:?}"
 mkdir -p "$STATE"
 cmd="$1"; shift
 case "$cmd" in
-  create)
+  create|run)
+    # `run` additionally prints the args it got (stands in for attaching to the agent).
+    [ "$cmd" = run ] && echo "fake sbx run args: $*"
     # `--kit DIR` is only checked for a spec.yaml; the kit itself (MCP registration, network
     # allow-list) is not emulated - the daemon is reached on localhost without a policy anyway.
     while [ $# -gt 0 ]; do
@@ -26,6 +28,7 @@ case "$cmd" in
         *) shift ;;
       esac
     done
+    [ -n "${name:-}" ] || { [ "$cmd" = run ] && exit 0; }
     echo "$name" >> "$STATE/sandboxes"; echo "created $name" ;;
   kit)
     [ "$1" = validate ] && [ -f "$2/spec.yaml" ] || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }

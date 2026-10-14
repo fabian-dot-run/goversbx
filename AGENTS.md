@@ -13,12 +13,14 @@ verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 ./gradlew :daemon:test               # unit + fast integration tests only
 ./gradlew :daemon:shadowJar          # build the daemon fat jar
 ./gradlew :sandbox-kit:packageKits   # zip each sbx kit (also: syncKitSkills after editing the skill)
+scripts/goversbx run claude ~/ws     # on the HOST: start the daemon if needed, then sbx run --kit ...
 scripts/e2e-claude.sh                # end-to-end test on a real sbx HOST (not from inside a sandbox)
 scripts/diagnose-substitution.sh     # on the HOST: which `set-custom --host` forms the proxy substitutes
 ```
 
 `scripts/e2e-claude.sh` takes `SBX=<binary>`; to check changes to the script from inside a sandbox,
-run it against the stub `scripts/testing/fake-sbx` (usage in its header). Keep `e2e-claude.sh` bash
+run it against the stub `scripts/testing/fake-sbx` (usage in its header); the same works for
+`scripts/goversbx` (`SBX=... GOVERSBX_STATE_DIR=<tmp>`). Keep the host scripts bash
 3.2 compatible - the host is macOS (no `timeout`, no bash 4 features).
 
 ### JDK/Gradle quirks (don't "fix" these without reason)
