@@ -1,6 +1,7 @@
 package run.fabian.daemon.sandboxidentity.adapter.sbx;
 
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +33,7 @@ public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
     }
 
     @Override
-    public List<String> listRunningSandboxNames() {
+    public List<RunningSandbox> listRunningSandboxes() {
         List<String> command = new java.util.ArrayList<>();
         command.add(sbxBinary);
         command.add("ls");
@@ -50,8 +51,8 @@ public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
                 log.warn("sbx ls failed (exit {}): {}", exitCode, output);
                 return List.of();
             }
-            List<String> running = parseRunningSandboxNames(output, mapper);
-            log.info("sbx ls: running sandboxes {}", running);
+            List<RunningSandbox> running = parseRunningSandboxes(output, mapper);
+            log.info("sbx ls: running sandboxes {}", running.stream().map(RunningSandbox::name).toList());
             return running;
         } catch (Exception e) {
             log.error("Failed to invoke sbx ls", e);
@@ -59,11 +60,11 @@ public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
         }
     }
 
-    static List<String> parseRunningSandboxNames(String json, ObjectMapper mapper) throws Exception {
+    static List<RunningSandbox> parseRunningSandboxes(String json, ObjectMapper mapper) throws Exception {
         SandboxSummary[] sandboxes = mapper.readValue(json, SandboxSummary[].class);
         return Arrays.stream(sandboxes)
                 .filter(s -> "running".equals(s.status()))
-                .map(SandboxSummary::name)
+                .map(s -> new RunningSandbox(s.name(), s.id()))
                 .toList();
     }
 }

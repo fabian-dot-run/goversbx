@@ -79,7 +79,10 @@ public final class RequestNetworkAccessTool {
             sandboxIdentityApi.registerAnyUnregisteredSandboxes();
             return McpSchema.CallToolResult.builder()
                     .addTextContent("This sandbox's identity isn't registered with the daemon yet - "
-                            + "registering it now. Please retry request_network_access in a few seconds.")
+                            + "registering it now. Please retry request_network_access in a few seconds. "
+                            + "If you still get this answer after about three retries, stop retrying: the daemon "
+                            + "is reachable but could not register this sandbox with sbx - tell the user to check "
+                            + "the goversbx daemon log on the host.")
                     .build();
         }
 

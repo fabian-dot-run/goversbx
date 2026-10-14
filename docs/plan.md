@@ -615,3 +615,12 @@ Claude kit therefore writes a marker-wrapped rule into `~/.claude/CLAUDE.md` (us
 time that explicitly supersedes that section for approvable blocks (not for org-policy or local deny
 rules), and the skill's description now names the proxy's 403 messages. The e2e test's Claude step
 switched to a prompt that doesn't mention goversbx.
+
+## Revision (2026-10-14): registrations keyed by sandbox id
+
+`SandboxIdentityService` remembered registered sandboxes by name for the daemon's lifetime. With the
+long-running daemon from `scripts/goversbx`, a sandbox removed and recreated under the same name lost
+its sandbox-scoped secret but was never registered again - the agent got "please retry" forever.
+`SbxSandboxListPort` now returns `RunningSandbox(name, id)` from `sbx ls --format json`, and the
+service keys registrations by both. The manual admin `register(name)` no longer marks anything (it
+doesn't know the incarnation); at worst the next reactive pass registers once more.

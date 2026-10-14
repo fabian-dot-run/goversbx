@@ -3,6 +3,7 @@ package run.fabian.daemon.sandboxidentity.application;
 import run.fabian.daemon.sandboxidentity.api.SandboxIdentityApi;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +29,12 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
     private final String envVarName;
     private final String placeholder;
     private final Pattern sandboxNamePattern;
+    /**
+     * Sandbox incarnations ({@code name + id} from {@code sbx ls}) registered by this process. Keyed
+     * by id, not just name: removing a sandbox drops its sandbox-scoped secret, and a sandbox created
+     * again under the same name must be registered again - keyed by name alone, the daemon would
+     * answer "please retry" to it forever (seen on a real host).
+     */
     private final Set<String> registered = ConcurrentHashMap.newKeySet();
 
     public SandboxIdentityService(
@@ -59,23 +66,28 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
 
     @Override
     public void registerAnyUnregisteredSandboxes() {
-        for (String sandboxName : listPort.listRunningSandboxNames()) {
-            if (registered.contains(sandboxName) || !sandboxNamePattern.matcher(sandboxName).matches()) {
+        for (RunningSandbox sandbox : listPort.listRunningSandboxes()) {
+            String key = sandbox.name() + "@" + sandbox.id();
+            if (registered.contains(key) || !sandboxNamePattern.matcher(sandbox.name()).matches()) {
                 continue;
             }
-            SandboxRegistrationResult result = register(sandboxName);
-            if (!result.applied()) {
-                log.warn("Failed to register sandbox identity for {}: {}", sandboxName, result.output());
+            SandboxRegistrationResult result = register(sandbox.name());
+            if (result.applied()) {
+                registered.add(key);
+            } else {
+                log.warn("Failed to register sandbox identity for {}: {}", sandbox.name(), result.output());
             }
         }
     }
 
+    /**
+     * Registers by name only (admin endpoint). Doesn't mark the sandbox as registered, because the
+     * incarnation (id) isn't known here; the next reactive pass may register it once more, which is
+     * harmless.
+     */
     public SandboxRegistrationResult register(String sandboxName) {
         SbxCustomSecretPort.Result result =
                 secretPort.registerPlaceholderSecret(sandboxName, targetHost, envVarName, placeholder, sandboxName);
-        if (result.applied()) {
-            registered.add(sandboxName);
-        }
         return new SandboxRegistrationResult(sandboxName, result.applied(), result.output());
     }
 }

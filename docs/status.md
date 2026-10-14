@@ -59,7 +59,17 @@ background if needed (builds the jar when stale, real mode, `~/.local/state/gove
 (new/existing sandbox, pi kit, non-default port -> `--kit-arg`, foreign process on the port); **not
 yet run on the host** - it relies on `sbx run` accepting `--kit` like `sbx create` does.
 
-**Next steps**: rerun `scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their
+**Found next (host, `scripts/goversbx run`):** a sandbox removed and created again under the same
+name (`test-goversbx`) was never re-registered - the long-running daemon remembered the *name* as
+registered, but the new incarnation had lost its sandbox-scoped secret, so every call got "please
+retry" (7x `sbx ls`, no `set-custom` in the log) until Claude reported the daemon as unreachable.
+Fixed: the daemon remembers registrations by `sbx ls` name **and id**; the retry answer tells the
+agent to stop after ~3 tries and point the user at the daemon log; `scripts/goversbx` warns when
+the running daemon is older than the code. (Encouraging side note: in that session Claude did reach
+for goversbx on its own.)
+
+**Next steps**: restart the daemon (`scripts/goversbx stop && scripts/goversbx start`), then rerun
+`scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their
 kits exist, never applied with real sbx); then the out-of-scope items (persistence, revocation, admin authn).
 
 ### How we got there

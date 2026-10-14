@@ -3,6 +3,8 @@ package run.fabian.daemon.sandboxidentity.adapter.sbx;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
+
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,9 +55,11 @@ class SbxCliSandboxListAdapterTest {
             """;
 
     @Test
-    void parsesOnlyRunningSandboxNames() throws Exception {
-        List<String> names = SbxCliSandboxListAdapter.parseRunningSandboxNames(SAMPLE_JSON, new ObjectMapper());
+    void parsesOnlyRunningSandboxesWithTheirIds() throws Exception {
+        List<RunningSandbox> sandboxes = SbxCliSandboxListAdapter.parseRunningSandboxes(SAMPLE_JSON, new ObjectMapper());
 
-        assertEquals(List.of("claude-goversbx", "omp-secret-manager"), names);
+        assertEquals(List.of(
+                new RunningSandbox("claude-goversbx", "defaed17-e79e-4a11-bb65-5c1c527ee557"),
+                new RunningSandbox("omp-secret-manager", "4bc520bc-c650-4304-b892-3ec9e1819d9f")), sandboxes);
     }
 }

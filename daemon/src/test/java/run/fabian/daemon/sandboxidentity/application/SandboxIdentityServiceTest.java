@@ -3,6 +3,7 @@ package run.fabian.daemon.sandboxidentity.application;
 import org.junit.jupiter.api.Test;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -18,7 +19,10 @@ class SandboxIdentityServiceTest {
     }
 
     private static SbxSandboxListPort listing(String... names) {
-        return () -> List.of(names);
+        List<RunningSandbox> sandboxes = java.util.Arrays.stream(names)
+                .map(name -> new RunningSandbox(name, "id-of-" + name))
+                .toList();
+        return () -> sandboxes;
     }
 
     @Test
@@ -120,6 +124,27 @@ class SandboxIdentityServiceTest {
         service.registerAnyUnregisteredSandboxes();
 
         assertEquals(1, calls.size());
+    }
+
+    @Test
+    void reRegistersASandboxRecreatedUnderTheSameName() {
+        List<Call> calls = new CopyOnWriteArrayList<>();
+        SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {
+            calls.add(new Call(sandboxName, targetHost, envVarName, placeholder, value));
+            return new SbxCustomSecretPort.Result(true, "ok");
+        };
+        AtomicReference<List<RunningSandbox>> running =
+                new AtomicReference<>(List.of(new RunningSandbox("test-goversbx", "first-id")));
+
+        SandboxIdentityService service = new SandboxIdentityService(
+                port, running::get, "localhost", "VAR", "placeholder");
+
+        service.registerAnyUnregisteredSandboxes();
+        running.set(List.of(new RunningSandbox("test-goversbx", "second-id")));
+        service.registerAnyUnregisteredSandboxes();
+        service.registerAnyUnregisteredSandboxes();
+
+        assertEquals(List.of("test-goversbx", "test-goversbx"), calls.stream().map(Call::sandboxName).toList());
     }
 
     @Test

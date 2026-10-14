@@ -70,6 +70,11 @@ start_daemon() {
   if healthy; then
     pid="$(daemon_pid)" && say "daemon already running (pid $pid), admin UI $ADMIN" \
       || say "daemon already running (not started by this script), admin UI $ADMIN"
+    # A daemon started before the last code change keeps running the old build.
+    if [ -f "$PID_FILE" ] && { [ "$JAR" -nt "$PID_FILE" ] \
+         || [ -n "$(find "$REPO_DIR/daemon/src" "$REPO_DIR/daemon/build.gradle.kts" -newer "$PID_FILE" -print -quit)" ]; }; then
+      say "WARNING: the running daemon is older than the daemon code - restart it: scripts/goversbx stop && scripts/goversbx start"
+    fi
     return 0
   fi
   for port in "$SANDBOX_API_PORT" "$ADMIN_PORT"; do
