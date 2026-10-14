@@ -8,6 +8,10 @@ import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
+import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
+import run.fabian.daemon.sandboxidentity.adapter.web.SandboxIdentityController;
+import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
+import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -26,10 +30,17 @@ public final class Main {
         String sandboxApiBind = env("GOVERSBX_SANDBOX_API_BIND", "0.0.0.0");
         String sbxBinary = env("GOVERSBX_SBX_BINARY", "sbx");
         boolean dryRun = Boolean.parseBoolean(env("GOVERSBX_SBX_DRY_RUN", "true"));
+        String identityTargetHost = env("GOVERSBX_IDENTITY_TARGET_HOST", "daemon.internal");
+        String identityEnvVar = env("GOVERSBX_IDENTITY_ENV_VAR", "GOVERSBX_SANDBOX_TOKEN");
+        String identityPlaceholder = env("GOVERSBX_IDENTITY_PLACEHOLDER", "goversbx-sandbox-identity-placeholder-v1");
 
         RequestRepository repository = new InMemoryRequestRepository();
         SbxPolicyPort sbxPolicyPort = new SbxCliPolicyAdapter(sbxBinary, dryRun);
         NetworkAccessService networkAccessService = new NetworkAccessService(repository, sbxPolicyPort);
+
+        SbxCustomSecretPort sbxCustomSecretPort = new SbxCliCustomSecretAdapter(sbxBinary, dryRun);
+        SandboxIdentityService sandboxIdentityService =
+                new SandboxIdentityService(sbxCustomSecretPort, identityTargetHost, identityEnvVar, identityPlaceholder);
 
         McpContext mcp = McpContext.build(networkAccessService);
 
@@ -45,11 +56,12 @@ public final class Main {
             config.staticFiles.add("/public");
         });
         new AdminApiController(networkAccessService).registerRoutes(adminApp);
+        new SandboxIdentityController(sandboxIdentityService).registerRoutes(adminApp);
         adminApp.start("127.0.0.1", adminPort);
         log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only)", adminPort);
 
         if (dryRun) {
-            log.warn("GOVERSBX_SBX_DRY_RUN=true - approvals will NOT actually call the sbx CLI");
+            log.warn("GOVERSBX_SBX_DRY_RUN=true - approvals and sandbox-identity registration will NOT actually call the sbx CLI");
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

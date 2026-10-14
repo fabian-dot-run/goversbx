@@ -180,8 +180,10 @@ TLS between mcp-server and daemon.
    `SandboxApiServer` must bind to for "always allow-listed" to actually work globally.
 2. Host-side mechanism to author a new kit/skill bucket so it's baked into new sandboxes — hard
    checkpoint before M4.
-3. **Known risk, accepted for the MVP: sandbox identity is not verified.** *(Carried forward in a
-   new shape by the 2026-10-14 revision below — still open, not resolved.)* The daemon trusts
+3. **Known risk, accepted for the MVP: sandbox identity is not verified.** *(RESOLVED by the
+   second 2026-10-14 revision below, via `sbx secret set-custom` - conditional on an operator
+   running the registration step before a sandbox starts. Left here verbatim as the historical
+   record of the risk as first identified.)* The daemon trusts
    whatever `sandboxName` the mcp-server sends with a request - there is no independent check
    against a live `sbx` inventory. This is not just a stdio-transport quirk (open question 5) -
    the same problem would resurface under an HTTP-transport design (see below), because in either
@@ -304,3 +306,61 @@ application-service behavior including the approve-while-blocked race, admin RES
 manual end-to-end curl session driving the full MCP Streamable HTTP handshake (`initialize` →
 `notifications/initialized` → `tools/call`) with a custom `X-Goversbx-Sandbox-Name` header,
 confirming it arrives correctly in the admin API's view of the resulting request.
+
+## Revision (2026-10-14, continued): `sbx secret set-custom` resolves open question 3 for real
+
+The "stronger fix" sketched in the previous revision turned out to already exist as a real,
+public, documented `sbx` feature - **`sbx` is open source** (`docker/sbx-releases`,
+`docker/sbx-kits-contrib` on GitHub; docs at docs.docker.com/ai/sandboxes/), which is how this was
+found and confirmed rather than guessed:
+
+- `sbx secret set-custom --sandbox <name> --target <host> --env <VAR> --placeholder <p> --value <v>`
+  is a stable (GA since sbx v0.32.0) command. The sandbox only ever sees `<p>` (via the declared
+  `--env` var); the sbx proxy does a **string replacement across every outbound HTTP header** sent
+  to `<host>`, rewriting `<p>` to `<v>` before the request leaves the sandbox - confirmed to work
+  for arbitrary custom headers, not just `Authorization`, and confirmed scopable per-sandbox via
+  `--sandbox` (vs. `-g` for global). This is exactly the `GH_TOKEN`/`MCP_SENTINEL_TOKEN_NAME`
+  pattern already observed empirically in this very sandbox's own env vars (see the first
+  revision's recon) - now known to be a generic, documented mechanism, not something special-cased
+  to GitHub/mcp-gateway. (One empirical check *did* rule something out first: a plain request
+  through this sandbox's general egress proxy to `httpbin.org/headers`, with no secret registered
+  for that target, came back with no sandbox-identifying header at all - confirming the mechanism
+  requires an explicit `--target`-scoped registration, it is not automatic for arbitrary egress.)
+- This daemon (not the sandbox) can run this command itself, exactly like it already shells out to
+  `sbx policy allow` - a new `sandboxidentity` bounded context does this:
+  `sandboxidentity.application.SandboxIdentityService` → `application.port.SbxCustomSecretPort` →
+  `adapter.sbx.SbxCliCustomSecretAdapter` (same dry-run-by-default shape as `networkaccess`'s sbx
+  adapter), fronted by an admin-only (loopback) `adapter.web.SandboxIdentityController` at
+  `POST /api/sandboxes/{name}/register`. The registered `--value` is simply the sandbox's own name
+  - the property needed is unforgeability, not secrecy, so there was no reason to mint a separate
+  opaque token.
+- `sandbox-kit/startup/000-cmd.sh` now sources the `X-Goversbx-Sandbox-Name` header from
+  `$GOVERSBX_SANDBOX_TOKEN` (the *placeholder*, populated by the `--env` declaration) instead of
+  `$SANDBOX_NAME` (a plain, self-reported value). By the time this header reaches the daemon, the
+  sbx proxy has already rewritten the placeholder to the real sandbox name - the daemon doesn't
+  need to change anything about how it reads the header, only sandboxes gain the one extra step of
+  carrying a proxy-substituted value instead of a self-reported one.
+
+**This genuinely resolves open question 3**, conditional on one operational step that still has to
+happen outside this repo: an operator (or future provisioning automation) must call
+`POST /api/sandboxes/<name>/register` (or run `sbx secret set-custom` directly) for a sandbox
+*before* that sandbox's kit-install step runs, since `$GOVERSBX_SANDBOX_TOKEN` only exists once
+that registration has happened - this ordering requirement is not yet automated end-to-end, and
+doing so would need to be wired into however sandboxes actually get created (still part of open
+question 2, the host-side kit-authoring mechanism). One other real `sbx` caveat worth watching,
+found in the same research: a separate GitHub issue documented that the placeholder can get
+base64-encoded by some HTTP clients before reaching the proxy, breaking substitution for `Basic`
+auth specifically - does not apply to our plain custom header, but worth re-checking if this
+header is ever base64-wrapped for any reason later.
+
+Verification performed: `./gradlew :daemon:test` (23 tests total, 3 new for `sandboxidentity`: a
+unit test asserting the service calls the port with the sandbox's own name as the substituted
+value, one asserting port failures surface correctly, and a `javalin-testtools` integration test
+for the registration endpoint) plus a manual dry-run call against the running daemon
+(`POST /api/sandboxes/claude-goversbx/register`) confirming the exact `sbx secret set-custom`
+command that would be run.
+
+Sources consulted: [`sbx secret set-custom`](https://docs.docker.com/reference/cli/sbx/secret/set-custom/),
+[Manage credentials](https://docs.docker.com/ai/sandboxes/configuration/credentials/),
+[Support custom secrets / environment variables passed into sandboxes (docker/sbx-releases#7)](https://github.com/docker/sbx-releases/issues/7),
+[docker/sbx-kits-contrib `claude` kit](https://github.com/docker/sbx-kits-contrib/tree/main/claude).

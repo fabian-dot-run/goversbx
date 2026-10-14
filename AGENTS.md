@@ -2,7 +2,8 @@
 
 Guidance for AI coding agents working in this repository. See `README.md` for what the project
 does and `docs/plan.md` for the full design rationale, open questions, and milestone status
-(including the 2026-10-14 revision that merged the MCP server into the daemon).
+(including the 2026-10-14 revisions that merged the MCP server into the daemon and added verified
+sandbox identity via `sbx secret set-custom`).
 
 ## Build & run
 
@@ -39,20 +40,24 @@ does and `docs/plan.md` for the full design rationale, open questions, and miles
 
 The daemon is the **only** deployable now (there used to be a separate `mcp-server` process and a
 shared `common` module - both were folded in here; see `docs/plan.md`'s 2026-10-14 revision for
-why). Internally it is split into two bounded contexts under
-`daemon/src/main/java/run/fabian/daemon/`:
+why). Internally it is split into bounded contexts under `daemon/src/main/java/run/fabian/daemon/`:
 
 - **`networkaccess`** - the approval workflow. Layered `domain` → `application` (+ `port`) →
   `adapter`, with a published `api` package (`NetworkAccessApi`, `NetworkAccessRequestView`,
   `RequestStatus`).
 - **`mcp`** - pure MCP-protocol translation. Has no domain of its own by design - it only adapts
   MCP tool calls into calls on `networkaccess.api`.
+- **`sandboxidentity`** - registers a sandbox's proxy-verified identity secret before that sandbox
+  starts (`sbx secret set-custom`, see "Sandbox identity" below). No domain either - it's a thin
+  `application` (+ `port`) → `adapter` wrapper around one `sbx` CLI call, same shape as
+  `networkaccess`'s `sbx` adapter. `mcp` doesn't call into this context at all - it just reads the
+  header this context's registration makes trustworthy.
 
-**The rule**: `mcp` must never import `networkaccess.domain`, `.application`, or `.adapter`
-directly - only `networkaccess.api`. This is enforced by convention/code review, not by the Java
-module system (JPMS would be real overkill here given Jetty/Reactor aren't cleanly modularized).
-If you add a third concern to this daemon, give it the same shape: its own package, talking to
-`networkaccess` only through `networkaccess.api`, never reaching into its internals.
+**The rule**: a bounded context must never import another one's `domain`, `.application`, or
+`.adapter` directly - only its published `.api` package (where one exists; `sandboxidentity` has
+none because nothing else needs to call it). This is enforced by convention/code review, not by the
+Java module system (JPMS would be real overkill here given Jetty/Reactor aren't cleanly
+modularized). If you add a fourth concern to this daemon, give it the same shape.
 
 Within `networkaccess`: `domain` has zero framework dependencies (no Javalin, no Jetty, no MCP
 SDK, no `ProcessBuilder`) and owns its own invariants - e.g. `NetworkAccessRequest.approve()`/
@@ -69,23 +74,39 @@ those ports (`adapter.persistence`, `adapter.sbx`) and hosts the driving HTTP ad
   authn in this MVP, and a sandbox must never be able to reach the approve/deny endpoints. If you
   add a new endpoint, think about which of the two it belongs on before adding it, and don't merge
   them into one listener to "simplify" it.
-- `SbxCliPolicyAdapter` defaults to `GOVERSBX_SBX_DRY_RUN=true` (logs the command it would run
-  instead of executing it). Don't flip this default - real sandboxes get their network policy
-  changed by this call.
-- Sandbox identity travels as an HTTP header (`X-Goversbx-Sandbox-Name`, see `McpContext`'s
-  `contextExtractor`), read by the mcp tool handlers via
-  `exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY)` - there is no more
-  per-process `$SANDBOX_NAME` env var now that one daemon process serves every sandbox. This is
-  exactly as trustworthy as the old env-var approach (a static value baked in once by the kit's
-  startup script, not independently verified) - see `docs/plan.md` open question 3 before treating
-  it as more secure than that.
+- `SbxCliPolicyAdapter` and `SbxCliCustomSecretAdapter` both default to `GOVERSBX_SBX_DRY_RUN=true`
+  (log the command they'd run instead of executing it). Don't flip this default - real sandboxes
+  get their network policy and identity secret changed by these calls.
+
+### Sandbox identity
+
+Identity travels as an HTTP header (`X-Goversbx-Sandbox-Name`, see `McpContext`'s
+`contextExtractor`), read by the mcp tool handlers via
+`exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY)` - there is no more
+per-process `$SANDBOX_NAME` env var now that one daemon process serves every sandbox.
+
+This header is now **proxy-verified, not self-reported**, via a confirmed, public `sbx` feature:
+`sbx secret set-custom --sandbox <name> --target <host> --env <VAR> --placeholder <p> --value <v>`
+makes a sandbox see only the placeholder `<p>` (as env var `<VAR>`), while the sbx proxy rewrites
+`<p>` to `<v>` in every outbound HTTP header sent to `<host>` - confirmed to work for arbitrary
+custom headers (not just `Authorization`), confirmed scopable per-sandbox. `sandboxidentity`'s
+`SandboxIdentityService.register(sandboxName)` runs this with `<v> = sandboxName` itself (identity
+needs to be unforgeable, not secret, so there's no separate opaque token to manage).
+`sandbox-kit/startup/000-cmd.sh` reads the placeholder from `$GOVERSBX_SANDBOX_TOKEN` (not
+`$SANDBOX_NAME`) when building the header.
+
+**This only works if an operator calls `POST /api/sandboxes/<name>/register` (loopback admin API)
+before that sandbox's kit-install step runs** - `$GOVERSBX_SANDBOX_TOKEN` doesn't exist until then.
+That ordering isn't automated yet (see `docs/plan.md`'s second 2026-10-14 revision) - don't assume
+every sandbox has gone through this, and don't remove the `McpContext` fallback to
+`"unknown-sandbox"` for the case where it hasn't.
 
 ## Testing conventions
 
 - Unit tests (`networkaccess/domain`, `networkaccess/application`): plain JUnit 5, no Javalin/Jetty
   involved. Use the real `InMemoryRequestRepository` as a fast, correct test double rather than
   mocking the repository port.
-- Fast integration tests (`networkaccess/adapter/web`, `mcp`): use `io.javalin.testtools
+- Fast integration tests (`networkaccess/adapter/web`, `mcp`, `sandboxidentity/adapter/web`): use `io.javalin.testtools
   .JavalinTest.test(app, (server, client) -> {...})` - boots the real app on an ephemeral port,
   tears down automatically. For the MCP endpoint specifically, drive it with the MCP Java SDK's
   own sync client (`McpClient.sync(HttpClientStreamableHttpTransport.builder(origin + "/mcp")

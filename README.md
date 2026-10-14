@@ -9,16 +9,17 @@ The daemon also serves the MCP protocol surface sandboxes talk to, over HTTP, th
 platform's own `mcp-gateway` does - there is no process or jar running inside the sandbox at all.
 
 See [`docs/plan.md`](docs/plan.md) for the full design and rationale, including the 2026-10-14
-revision that moved the MCP server into the daemon.
+revisions that moved the MCP server into the daemon and added verified sandbox identity via
+`sbx secret set-custom`.
 
 ## Modules
 
 | Module        | Runs where              | Purpose                                                             |
 |---------------|--------------------------|-----------------------------------------------------------------------|
-| `daemon`      | host, outside sandboxes | Everything: the approval workflow and the MCP endpoint, as two bounded contexts (see below) |
+| `daemon`      | host, outside sandboxes | Everything: the approval workflow, the MCP endpoint, and sandbox-identity registration, as three bounded contexts (see below) |
 | `sandbox-kit` | packaging only           | `SKILL.md` + draft durable-startup hook, bundled into a zip            |
 
-### Inside `daemon`: two bounded contexts, hexagonal layering
+### Inside `daemon`: bounded contexts, hexagonal layering
 
 - `networkaccess` - the approval workflow. `domain` (entity + invariants) →
   `application` (use-case service + driven ports) → `adapter` (in-memory repository, `sbx` CLI
@@ -27,6 +28,9 @@ revision that moved the MCP server into the daemon.
   may depend on.
 - `mcp` - pure MCP-protocol translation against `networkaccess.api`. Has no domain of its own by
   design; it exists purely to adapt MCP tool calls into calls on the published API.
+- `sandboxidentity` - registers a sandbox's proxy-verified identity secret
+  (`sbx secret set-custom`) before that sandbox starts. Operator-facing, admin-only; `mcp` doesn't
+  call into it directly - it just reads the header the registration makes trustworthy.
 
 ## Building
 
@@ -57,9 +61,24 @@ Two HTTP listeners start:
 - **Admin UI + API** — `127.0.0.1:8788` only (`GOVERSBX_ADMIN_PORT`), never exposed to a
   sandbox. Open it in a browser to approve/deny pending requests.
 
-By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals log what `sbx policy allow ...` *would* run
-without calling it. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't on `PATH`) to
-apply real policy changes.
+By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals and sandbox-identity registration log what
+they *would* run without calling `sbx`. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't
+on `PATH`) to apply real changes.
+
+### Registering a sandbox's verified identity
+
+Before a sandbox starts, register it so its MCP requests carry a proxy-verified
+`X-Goversbx-Sandbox-Name` header instead of a self-reported one:
+
+```bash
+curl -X POST http://localhost:8788/api/sandboxes/<sandbox-name>/register
+```
+
+This runs `sbx secret set-custom --sandbox <name> --target daemon.internal --env
+GOVERSBX_SANDBOX_TOKEN --placeholder ... --value <name>` under the hood - the sbx proxy then
+rewrites the placeholder to the real sandbox name on every outbound header to the daemon, so the
+sandbox itself never sees or controls the real value (see `docs/plan.md`'s second 2026-10-14
+revision). `GOVERSBX_IDENTITY_TARGET_HOST`/`_ENV_VAR`/`_PLACEHOLDER` customize the details.
 
 To register the MCP endpoint in a local Claude Code session for manual testing:
 
@@ -83,15 +102,12 @@ for registering a new `sbx` kit still needs to be confirmed (see `docs/plan.md`,
 
 ## Status
 
-Milestones M1–M4 from the original plan, plus the 2026-10-14 revision that merged the MCP server
-into the daemon as a second bounded context, are implemented and verified: unit tests for the
-domain/application layers, `javalin-testtools` integration tests for both the admin REST API and
-the real MCP HTTP endpoint (20 tests total, `./gradlew :daemon:test`), and a manual end-to-end
-curl session exercising the full MCP Streamable HTTP handshake. M5 (wiring the real `sbx policy
+Milestones M1–M4 from the original plan, the revision that merged the MCP server into the daemon,
+and the revision that added verified sandbox identity via `sbx secret set-custom` are all
+implemented and verified: unit tests for the domain/application layers, `javalin-testtools`
+integration tests for the admin REST API, the registration endpoint, and the real MCP HTTP
+endpoint (23 tests total, `./gradlew :daemon:test`), plus manual end-to-end curl sessions for both
+the MCP Streamable HTTP handshake and the registration endpoint. M5 (wiring the real `sbx policy
 allow` call against a live sandbox, and resolving the host-side kit registration mechanism) is not
-yet done.
-
-**Known risk, accepted for the MVP**: the daemon trusts whatever sandbox-name header a request
-carries - there is no independent check that it actually came from that sandbox. See
-`docs/plan.md`, open question 3, for why this isn't just a transport-specific quirk and what fixing
-it would require.
+yet done; nor is wiring the registration step into actual sandbox provisioning (currently a manual
+`curl`/API call an operator makes before a sandbox starts).
