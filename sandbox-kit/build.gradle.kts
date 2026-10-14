@@ -15,6 +15,7 @@ val kitSkillDirs = mapOf(
     "goversbx-claude" to "files/home/.claude/skills",
     "goversbx-pi" to "files/home/.agents/skills",
     "goversbx-omp" to "files/home/.omp/agent/skills",
+    "goversbx-opencode" to "files/home/.agents/skills",
 )
 
 val syncKitSkills = tasks.register("syncKitSkills") {

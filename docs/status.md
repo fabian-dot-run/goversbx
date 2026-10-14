@@ -166,7 +166,81 @@ placeholder derived from the sandbox name in each kit startup script (e.g.
 `goversbx-ph-$SANDBOX_NAME`), with the daemon recognizing any `goversbx-ph-*` value as unregistered -
 still unforgeable as long as a sandbox-scoped secret only applies to that sandbox's own traffic.
 
-## In progress: nested sbx dev sandbox (2026-10-14)
+## pi, oh-my-pi, opencode: e2e scripts + new opencode kit (2026-10-14)
+
+Extends the automated e2e approach (`scripts/e2e-claude.sh`) to the other three agents, continuing
+the backlog item "pi/omp end to end (kits exist, never applied with real sbx)" plus a new opencode
+kit. **Not yet run against a real sbx host** (blocked here by the nested-sbx pause above) - mechanics
+only, checked against `scripts/testing/fake-sbx` (same smoke-test method the claude kit used before
+its first real run) and, for the install steps, for real in this sandbox (not against a real sbx
+sandbox, just the bare command).
+
+- `sandbox-kit/kits/goversbx-opencode/` (new): opencode is a **built-in sbx agent**
+  (`sbx create --help` lists it alongside claude), so this kit mirrors `goversbx-claude`'s
+  install+startup pattern rather than pi/omp's startup-only one. Facts sourced from opencode's own
+  docs (`anomalyco/opencode`, `packages/web/src/content/docs/{mcp-servers,config,skills,cli}.mdx`,
+  fetched via `gh api`): global MCP config `~/.config/opencode/opencode.json` under `"mcp"`, a
+  remote entry needs `"type": "remote"` + `url` (+ `headers`); header values interpolate
+  `{env:VAR}` (not pi/omp's `${VAR}`), so the hardcoded placeholder is sent verbatim; skills are
+  discovered from `~/.agents/skills/<name>/SKILL.md` among other locations - the same path the pi
+  kit already uses, so the kit reuses it (added to `syncKitSkills`'s `kitSkillDirs` in
+  `sandbox-kit/build.gradle.kts`); one-shot run is `opencode run "<msg>" --auto` (auto-approves
+  permissions not explicitly denied); `opencode mcp list`/`mcp ls` lists configured servers and
+  connection status (unlike pi/omp, which have no such subcommand). No Node/Bun guarantee (opencode
+  ships as a standalone binary), so the merge script (`register-opencode-mcp.sh`) uses `jq` instead
+  of `node -e`, skipping gracefully if `jq` is absent. Verified locally: merges into an empty
+  config, preserves an existing unrelated `mcp` entry and other top-level keys, and fails loudly
+  (doesn't overwrite) on malformed JSON.
+- `scripts/e2e-pi.sh`, `scripts/e2e-omp.sh`, `scripts/e2e-opencode.sh` (new): same shape as
+  `e2e-claude.sh` (daemon, two throwaway sandboxes, curl-driven MCP identity/approval flow, 4b
+  identity-isolation check), with per-agent differences only in sandbox creation and step 5 (real
+  agent). pi/omp have no sbx built-in agent, so both layer their kit onto a `shell` sandbox and the
+  script installs the agent itself (not the kit's job) before the kit's startup script can configure
+  it. Both default `TARGET_HOST`/`PI_TARGET_HOST` etc. need pre-blocking like `e2e-claude.sh`'s;
+  step 5 needs `ANTHROPIC_API_KEY` and auto-skips without it (mirrors `SKIP_CLAUDE`, but opt-out by
+  default rather than needing the flag, since a stray CI/dev run is more likely to lack a key than
+  to want to skip on purpose).
+  - pi: `npm install -g @earendil-works/pi-coding-agent` - confirmed for real in this sandbox
+    (`registry.npmjs.org` approved via goversbx): installs cleanly, `pi --version` -> 1.2.0, cleaned
+    up afterward. `pi --print "<msg>"` is the one-shot flag (pi docs); MCP tools with
+    `exposure: "direct"` (the kit already sets this) are declared to the model regardless of
+    `--tools`, so no extra scoping flag is needed for the goversbx tool to be visible.
+  - omp: **not** omp's own `curl -fsSL https://omp.sh/install | sh`, even though that's its
+    documented default - confirmed for real that its prebuilt-binary fallback resolves a freshly
+    signed, randomly-named `*.r2.cloudflarestorage.com` URL on every run (different bucket subdomain
+    each time), so there is no stable host a goversbx approval or `sbx policy allow` could ever
+    pre-authorize. Confirmed `npm install -g @oh-my-pi/pi-coding-agent` alone doesn't work either:
+    it installs, but the package's own `bin` is a `.ts` file (`"bin": {"omp": "src/cli.ts"}`) that
+    needs bun to execute - `omp` then fails with `env: 'bun': No such file or directory`. The script
+    instead installs bun (`curl -fsSL https://bun.sh/install | bash`, a stable host - confirmed
+    working) then `bun install -g @oh-my-pi/pi-coding-agent` (omp's own "Bun (recommended)" method -
+    confirmed for real: `omp --version` -> `omp/18.10.4`, and it reads `ANTHROPIC_API_KEY` as
+    expected). `omp -p "<msg>"` is the one-shot flag; `yolo` is omp's **default** approval mode
+    (auto-approves read/write/exec), so a plain `omp -p` run never blocks on an interactive prompt -
+    no extra flag needed. omp has no CLI subcommand to list MCP servers headlessly (`/mcp list` is
+    an interactive slash command only), so the script checks `~/.omp/agent/mcp.json` directly
+    instead.
+  - opencode: no install step (built-in sbx agent, like claude).
+- Mechanics confirmed with `scripts/testing/fake-sbx` (all three scripts, `SKIP_PI=1`/`SKIP_OMP=1`/
+  `SKIP_OPENCODE=1`): daemon start, kit validate, sandbox create, network reach, the full curl-driven
+  identity/registration/approval/policy-allow/reachability flow, and the 4b identity-isolation
+  check all pass. For pi/omp this used the real install commands (fake-sbx's `exec` runs for real
+  locally, unlike a real sandboxed container) - the smoke test actually installed and then removed
+  pi and omp/bun in this dev sandbox each time, which is how the CDN-host finding above was made.
+- `./gradlew check` passes (includes `verifyKitSkills` for the new opencode kit).
+- **Next**: run all three for real against a real sbx host (step 5, the actual autonomous-tool-use
+  proof, needs `ANTHROPIC_API_KEY` there) - the user's host, once nested-sbx or an equivalent
+  real-`sbx` environment is available again.
+
+## Paused: nested sbx dev sandbox (2026-10-14)
+
+**Paused by the user (2026-10-14):** the goal was letting the agent test independently instead of
+needing a host run each time - not re-proving the core flow, which is already verified end to end
+on the real host (see "MVP verified end to end" and "sandbox-kit is a real sbx kit" above, including
+with real Claude Code). Blocked on a Docker Sandboxes account-enrollment issue outside this
+repo's/agent's control (see the last bullet below). Not worth pursuing further for now; resume only
+if that account issue gets resolved independently. The inner sbx install itself stays in
+`goversbx-dev` (KVM, `docker-sbx`, login all still work) in case it's useful later.
 
 Goal: let the agent test against a real `sbx` itself instead of handing every host run to the user.
 `claude-goversbx` (the current dev sandbox) has no KVM (`kvm: HYP mode not available`). sbx has an
@@ -193,6 +267,93 @@ Plan inside `goversbx-dev` (an agent resuming here should do this):
 Caveat: the inner sbx is the Linux build, so proxy details (e.g. `host.docker.internal` seen as
 `localhost`) may differ from macOS; the user's host stays the reference for final confirmation.
 
+**Progress (2026-10-14, inside `goversbx-dev`):** steps 1-2 done.
+- Step 1: `/dev/kvm` exists, `dmesg` shows no "HYP mode not available" - nested virtualization is
+  working (the host's `sbx settings set feature.sandbox-nested` + `--nested` run succeeded).
+- Step 2: installed `docker-sbx` 0.48.0 via apt, matching the host's version. `ports.ubuntu.com`
+  and `download.docker.com` were blocked by the sandbox's default-deny policy; requested both
+  through goversbx (`request_network_access`) and got approved rather than asking the user to run
+  `sbx policy allow` by hand. `usermod -aG kvm` from the README wasn't needed/possible: no `kvm`
+  group exists on this image, but `/dev/kvm` is already owned `agent:agent` with rw for the owner,
+  so the `agent` user has access as-is.
+- Step 3: `sbx login` needed a human (device-auth against Docker). The user ran `! sbx login` after
+  `login.docker.com` was approved through goversbx; signed in as `<docker-user>`.
+- Step 4: built the daemon jar inside `goversbx-dev` (`./gradlew :daemon:shadowJar`) - the jar from
+  the host's prior builds was already present (direct git workspace mode), but Gradle itself still
+  needed its wrapper distribution and plugin resolution, which chained through several hosts, each
+  requested via goversbx: `services.gradle.org` -> redirects through `github.com` ->
+  `release-assets.githubusercontent.com` (actual zip); `plugins.gradle.org` -> `plugins-artifacts.gradle.org`
+  for the shadow plugin. Build succeeded once all four were approved.
+  - The inner sbx's own global network policy was uninitialized (`sbx policy ls` -> "global network
+    policy has not been initialized"); ran `sbx policy init balanced` - this only affects sandboxes
+    nested inside `goversbx-dev`, not the outer sandbox or the host.
+  - `scripts/e2e-claude.sh` picked up the **outer** sandbox's `SANDBOX_NAME=goversbx-dev` env var as
+    its default test-sandbox name (collision risk) - must pass an explicit `SANDBOX_NAME=...` when
+    running it from inside a goversbx sandbox.
+  - **Blocker found:** `sbx kit validate`/`sbx create --kit <local-dir>` fails with `load kit
+    policy: read kit.allowedSources: administrator settings are unavailable` (daemon log:
+    `error_category":"connection_refused"` talking to a local "administrator settings" backend).
+    This is Docker Desktop's admin-console sync component, which doesn't exist in this headless
+    Linux CLI-only install - not a goversbx network block, and not something fixable from inside the
+    sandbox. **This blocks kit-based testing entirely on the inner sbx** (no local/git/OCI kit can
+    be validated or used with `--kit`), so `sandbox-kit/kits/goversbx-claude` can't be exercised
+    here; the host remains the only place that can test kits for now.
+  - Fallback: plain `sbx create --name <n> claude <workspace>` (no `--kit`) works - this skips kit
+    resolution entirely, so it can still exercise the core MCP/identity/approval flow manually
+    (like the "Manual MVP test runbook" below), just without the kit's automatic install.
+  - Pulling the base image needed two more goversbx approvals: `registry-1.docker.io` /
+    `auth.docker.io` (plain 403 "Approval required", not a Docker Hub permission issue despite the
+    daemon log saying `registry_access_denied` - that's just how sbx reports a proxy-blocked pull)
+    and `production.cloudfront.docker.com` (the CDN host actual registry blobs 307-redirect to -
+    `curl -L` against a manually-fetched registry token showed this). After all four, `docker/
+    sandbox-templates:claude-code-docker` pulled and a **workspace-less** `sbx create --name N
+    claude` (no `--kit`, no path) succeeded end-to-end (image pull, container start).
+  - **Second blocker, same root cause:** `sbx create --name N claude <any-path>` (a workspace bind
+    mount) fails for every path tried (the outer sandbox's own `/Users/fabian/...` path, and a
+    fresh `/home/agent/...` dir inside `goversbx-dev` itself): `403 Forbidden: mount policy denied:
+    ... fs:mount:read denied: no applicable policies ... fs:mount:write denied: no applicable
+    policies`. No `sbx policy allow fs`/`mount` subcommand exists to grant this locally - filesystem
+    mount authorization is evaluated the same way as `kit.allowedSources` (administrator-settings-
+    backed), so it's unavailable for the same reason. Only workspace-less sandboxes can be created
+    on this inner sbx.
+  - **Third blocker, same root cause:** tried the core identity/approval flow manually, without a
+    kit, using workspace-less sandboxes and an explicit `sbx policy allow network <host>
+    --sandbox <n>` (standing in for the kit's `permissions.network.allow`). That allow itself was
+    rejected: `error: allow network rule: network policy for "localhost:9787" is managed by your
+    organization; local allow rules are not applied`. Confirmed with a direct `curl -v` from inside
+    a nested sandbox to `host.docker.internal:9787`: `403 Blocked by org policy` - the exact phrase
+    our own CLAUDE.md says goversbx cannot lift.
+  - **Correction after the user confirmed the inner sbx's Docker account (`<docker-user>`) is individual,
+    not an org account:** the "managed by your organization" wording is misleading boilerplate, not
+    a real org. The daemon's own audit log confirms it (`org_id:"" org_name:""` on every session).
+    Traced the actual cause: `strings /usr/bin/sbx` found the policy/governance client talks to
+    `https://api.sandboxes-cloud.docker.com`; that host was itself blocked by the **outer**
+    sandbox's goversbx policy (`curl` -> "Approval required for api.sandboxes-cloud.docker.com:443"
+    - a goversbx block, not sbx's). Requested and got it approved. After that the daemon log's
+    `"policy fetch failed"` changed from an opaque "auth token rejected" at the network layer to a
+    real `401 Unauthorized` from Docker's own API (confirmed with a direct authenticated `curl`) -
+    i.e. the network path is now open, but Docker's governance/policy-snapshot API rejects this
+    account's token for that specific endpoint even though plain Docker Hub/registry auth (image
+    pulls, `sbx create`) works fine. Restarting the daemon and re-running `sbx login` (which itself
+    warned `could not refresh sandbox policies in the running daemon`) didn't change the 401.
+    `strings` also turned up a `v1/user_profiles/%s/enrollment_url?beta=true` + "token exchange"
+    code path next to the governance error strings, suggesting Docker Sandboxes governance needs a
+    separate account enrollment/entitlement step beyond a plain `sbx login` - plausibly one normally
+    done through the Docker Desktop GUI, which this headless `apt install docker-sbx` build skips.
+  - **Conclusion:** not an org-policy problem and not a goversbx/network problem (fixed that part -
+    `api.sandboxes-cloud.docker.com` is now allowed for this sandbox). It's the `<docker-user>` Docker
+    account not being authorized against Docker's Sandboxes governance API (`kit.allowedSources`,
+    filesystem mount policy, and centrally-managed network policy all read through this one 401'ing
+    endpoint) - plain sandbox creation, image pulls and `sbx exec` all work fine without it. KVM,
+    nested virtualization, and sbx itself are all confirmed working. **Not fixable from inside the
+    sandbox or via goversbx** (the one actual network block in this chain is already lifted).
+    Options for whoever resumes this: (a) find out whether `<docker-user>` (or whichever account logs
+    into the inner sbx) needs a separate Docker Sandboxes enrollment step done via a browser/Docker
+    Desktop; (b) try a different already-enrolled Docker account for the inner `sbx login`; (c) treat
+    the nested-sbx idea as validated only up to "can create real workspace-less sandboxes and pull
+    real images", and keep testing goversbx's actual mechanics (kits, network policy, workspaces) on
+    the host as before.
+
 ## What exists
 
 One deployable, `daemon/` (Java 21 bytecode, Gradle 9.8.1 wrapper), plus `sandbox-kit/`
@@ -216,9 +377,9 @@ Three bounded contexts under `run.fabian.daemon`, talking only through `*.api` p
   to retry. From then on the sbx proxy rewrites the
   placeholder to the real sandbox name.
 
-`sandbox-kit/`: sbx v2 mixin kits `kits/goversbx-{claude,pi,omp}/` (spec.yaml + files/), each with a
-copy of the shared skill from `skill/goversbx-network-access/` (`syncKitSkills`; `check` fails on
-drift). Details in `AGENTS.md`, "Sandbox kit".
+`sandbox-kit/`: sbx v2 mixin kits `kits/goversbx-{claude,pi,omp,opencode}/` (spec.yaml + files/),
+each with a copy of the shared skill from `skill/goversbx-network-access/` (`syncKitSkills`; `check`
+fails on drift). Details in `AGENTS.md`, "Sandbox kit".
 
 ### Verified
 
@@ -306,6 +467,7 @@ becomes reachable from that sandbox.
 ## Backlog (after the Claude MVP works)
 
 - Find where mixin agent instructions land; optionally a launchd agent so the daemon starts at login.
-- Verify oh-my-pi against a real omp install (needs Bun); add opencode (`~/.config/opencode/opencode.json`, `"type": "remote"`).
+- Run `scripts/e2e-pi.sh`, `scripts/e2e-omp.sh`, `scripts/e2e-opencode.sh` for real against a real
+  sbx host (see "pi, oh-my-pi, opencode" section above - mechanics-only so far).
 - Out of MVP scope so far: revocation/expiry of approvals, persistence, authn on the admin UI
   (currently only protected by loopback binding), audit log, deny reason back to the agent.
