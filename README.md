@@ -49,7 +49,36 @@ Runs the full test suite too: fast JUnit 5 unit tests for the domain/application
 `javalin-testtools`-backed integration tests that boot the real admin REST API and the real MCP
 HTTP endpoint (driven by the MCP Java SDK's own client) against an ephemeral port.
 
-## Quick start (host)
+## Install on macOS (Homebrew)
+
+Apple Silicon only. The daemon is a GraalVM native binary - no JVM needed.
+
+```bash
+brew tap <owner>/goversbx
+brew install goversbx
+brew services start goversbx        # daemon at login (launchd); or `goversbx start` on demand
+goversbx run claude ~/my-project    # start a sandbox with the kit
+```
+
+Admin UI: http://127.0.0.1:8788. The installed `goversbx` is the same launcher as
+`scripts/goversbx` below; it runs the native `goversbx-daemon` and uses the kits shipped with the
+formula. The release tarball (`goversbx-<version>-darwin-arm64.tar.gz`) works unpacked as is.
+
+### Releasing
+
+Push a tag `v<version>`. `.github/workflows/release.yml` builds the native binary on an Apple
+Silicon runner (native-image can't cross-compile), smoke-tests it, attaches the tarball to a GitHub
+release and updates `Formula/goversbx.rb` in the tap repo (rendered from
+`packaging/homebrew/goversbx.rb.template`; setup notes at the top of the workflow). Locally, on any
+platform: `GRAALVM_HOME=... scripts/package-release.sh`.
+
+The native image needs reflection/resource metadata for what the daemon serializes and serves.
+`daemon/src/main/resources/META-INF/native-image/` holds it; after changing JSON types, routes or
+the admin UI's files, regenerate it with `GRAALVM_HOME=... scripts/native-metadata.sh` (runs
+`scripts/testing/daemon-smoke.sh` under GraalVM's tracing agent) and commit the result.
+`./gradlew :daemon:nativeCompile` builds just the binary.
+
+## Quick start (repo checkout)
 
 ```bash
 scripts/goversbx run claude ~/my-project        # = start daemon if needed, then sbx run --kit ... claude ~/my-project

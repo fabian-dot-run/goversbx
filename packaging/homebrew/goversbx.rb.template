@@ -1,0 +1,61 @@
+# typed: false
+# frozen_string_literal: true
+
+# Rendered by packaging/homebrew/render-formula.sh into the tap repo's Formula/goversbx.rb on every
+# release (.github/workflows/release.yml). Edit the template in the goversbx repo, not the tap.
+class Goversbx < Formula
+  desc "Human-approved outbound network access for agents in Docker Sandboxes"
+  homepage "https://github.com/@REPO@"
+  url "https://github.com/@REPO@/releases/download/v@VERSION@/goversbx-@VERSION@-darwin-arm64.tar.gz"
+  sha256 "@SHA256@"
+
+  depends_on arch: :arm64
+  depends_on :macos
+
+  def install
+    libexec.install "bin/goversbx", "bin/goversbx-daemon"
+    pkgshare.install "share/goversbx/kits", "share/goversbx/VERSION"
+    # opt_ paths survive upgrades, so a daemon started by `goversbx start` keeps a valid binary path.
+    (bin/"goversbx").write_env_script libexec/"goversbx",
+      GOVERSBX_DAEMON_BIN: opt_libexec/"goversbx-daemon",
+      GOVERSBX_KITS_DIR:   opt_pkgshare/"kits"
+  end
+
+  service do
+    run opt_libexec/"goversbx-daemon"
+    # sbx must be on this PATH; Homebrew's and the system bin dirs are.
+    environment_variables GOVERSBX_SBX_DRY_RUN: "false", PATH: std_service_path_env
+    keep_alive true
+    log_path var/"log/goversbx.log"
+    error_log_path var/"log/goversbx.log"
+  end
+
+  def caveats
+    <<~EOS
+      goversbx drives Docker Sandboxes' `sbx` CLI, which must be on your PATH.
+
+      Run the daemon at login:   brew services start goversbx
+      or only when needed:       goversbx start
+
+      Admin UI (approve/deny requests): http://127.0.0.1:8788
+      New sandbox with the kit:         goversbx run claude ~/my-project
+                                        (--goversbx-kit pi|omp|opencode for other agents)
+    EOS
+  end
+
+  test do
+    assert_equal version.to_s, shell_output("#{bin}/goversbx version").strip
+
+    sandbox_port = free_port
+    admin_port = free_port
+    pid = spawn({ "GOVERSBX_SANDBOX_API_BIND" => "127.0.0.1",
+                  "GOVERSBX_SANDBOX_API_PORT" => sandbox_port.to_s,
+                  "GOVERSBX_ADMIN_PORT"       => admin_port.to_s },
+                libexec/"goversbx-daemon")
+    sleep 3
+    assert_match "ok", shell_output("curl -s http://127.0.0.1:#{admin_port}/api/health")
+    assert_match "goversbx", shell_output("curl -s http://127.0.0.1:#{admin_port}/")
+  ensure
+    Process.kill("TERM", pid) if pid
+  end
+end

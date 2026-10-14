@@ -1,0 +1,76 @@
+# Builds the native macOS (Apple Silicon) release and publishes it to Homebrew.
+#
+# Push a tag `v<version>` to release:
+#   1. build the native daemon on an Apple Silicon runner (native-image can't cross-compile)
+#   2. smoke-test that binary (scripts/testing/daemon-smoke.sh) - nothing is published if it fails
+#   3. attach goversbx-<version>-darwin-arm64.tar.gz (+ .sha256) to a GitHub release
+#   4. render packaging/homebrew/goversbx.rb.template into the tap repo's Formula/goversbx.rb
+#
+# Run it manually (workflow_dispatch) to only build and smoke-test, without publishing.
+#
+# Setup, once:
+#   - a public tap repo, by default <owner>/homebrew-goversbx (override with the repository
+#     variable HOMEBREW_TAP_REPO), initialised with at least one commit on `main`
+#   - repository secret HOMEBREW_TAP_TOKEN: a fine-grained token with "Contents: read and write"
+#     on the tap repo only
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: "25"
+          distribution: graalvm-community
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build, smoke-test and package
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="0.0.0-ci.$GITHUB_RUN_NUMBER"; fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          VERSION="$VERSION" scripts/package-release.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: goversbx-darwin-arm64
+          path: build/release/goversbx-*
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/release/goversbx-$VERSION-darwin-arm64.tar.gz" \
+            "build/release/goversbx-$VERSION-darwin-arm64.tar.gz.sha256" \
+            --title "goversbx $VERSION" --generate-notes
+
+      - name: Update the Homebrew tap
+        if: github.ref_type == 'tag'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || format('{0}/homebrew-goversbx', github.repository_owner) }}
+        run: |
+          [ -n "$TAP_TOKEN" ] || { echo "::error::secret HOMEBREW_TAP_TOKEN is not set"; exit 1; }
+          sha="$(cat "build/release/goversbx-$VERSION-darwin-arm64.tar.gz.sha256")"
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/$TAP_REPO.git" tap
+          mkdir -p tap/Formula
+          packaging/homebrew/render-formula.sh "$GITHUB_REPOSITORY" "$VERSION" "$sha" > tap/Formula/goversbx.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/goversbx.rb
+          git diff --cached --quiet && { echo "formula unchanged"; exit 0; }
+          git commit -m "goversbx $VERSION"
+          git push origin HEAD:main

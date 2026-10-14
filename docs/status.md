@@ -3,6 +3,40 @@
 Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## macOS installer: native binary + Homebrew tap (2026-10-14, not yet released)
+
+Goal: `brew install` on Apple Silicon, no JVM. Decided with the user: public GitHub repos for the
+code and the tap (Homebrew can't download from the private <private-git-host> without a custom download
+strategy), arm64 only.
+
+- **Native daemon** (`./gradlew :daemon:nativeCompile`, GraalVM CE 25.0.4 / native-image, plugin
+  `org.graalvm.buildtools.native` 1.1.14): 43 MB standalone binary, builds in ~30 s. Metadata from
+  the tracing agent over `scripts/testing/daemon-smoke.sh` (new: drives health, the admin UI's
+  static files, the admin API, SSE, MCP initialize/tools/list/both tools, reactive registration
+  and approval against `fake-sbx`) plus a hand-written `public/**` glob. **Verified here on Linux
+  arm64**: all 16 smoke checks pass on the native binary, also with the binary copied alone (the
+  `libmanagement_ext.so` native-image emits next to it isn't needed). Found on the way: the SSE
+  endpoint only streams for `Accept: text/event-stream` (browsers' EventSource send it; plain curl
+  gets an empty 200) - the test sends the header, the daemon is unchanged.
+- **Launcher** (`scripts/goversbx`) now has an installed layout: native `goversbx-daemon` next to
+  it (or `GOVERSBX_DAEMON_BIN`), kits in `../share/goversbx/kits` (or `GOVERSBX_KITS_DIR`), resolves
+  its own symlinks by hand (bash 3.2/macOS), new `version` command; the repo checkout still runs the
+  jar. `--goversbx-kit` now lists opencode too.
+- **Release tarball** (`scripts/package-release.sh`): native build + smoke test + `goversbx-<v>-
+  <os>-<arch>.tar.gz`. Verified the Linux tarball unpacked, through a symlink, with an empty
+  `PATH`-ish env: `version`, `start` (native daemon), admin UI 200, `status`, `stop`.
+- **Homebrew**: `packaging/homebrew/goversbx.rb.template` (installs into `libexec`/`pkgshare`,
+  `bin/goversbx` env script with `opt_` paths, `brew services` launchd service with
+  `GOVERSBX_SBX_DRY_RUN=false`, caveats, a `test do` that boots the binary on free ports) and
+  `render-formula.sh`. Checked: renders, `ruby -c` OK, rejects a bad sha256. **Not** run through a
+  real `brew install` yet - Linuxbrew here needs `ghcr.io`, which couldn't be requested because the
+  host's goversbx daemon was down at the time.
+- **CI** (`.github/workflows/release.yml`): tag `v*` -> macos-15 runner, setup-graalvm, package +
+  smoke test, GitHub release, push rendered formula to `<owner>/homebrew-goversbx` (secret
+  `HOMEBREW_TAP_TOKEN`). Never run - the repos don't exist on GitHub yet.
+- **Not verified at all yet: the macOS build itself.** The first tag push (or a manual
+  `workflow_dispatch`) is where the macOS binary gets built and smoke-tested for the first time.
+
 ## MVP verified end to end with Claude Code (third real run, 2026-10-14, sbx v0.48.0)
 
 `scripts/e2e-claude.sh` on the user's macOS host, real `sbx`, real Claude Code in throwaway

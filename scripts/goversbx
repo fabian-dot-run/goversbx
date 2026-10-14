@@ -3,33 +3,55 @@
 # goversbx kit. A kit can't do this itself - kit hooks run inside the sandbox, the daemon needs the
 # host's sbx CLI and must stay outside the sandbox's control.
 #
-#   scripts/goversbx run [--goversbx-kit claude|pi|omp] [sbx run args...]
+#   goversbx run [--goversbx-kit claude|pi|omp|opencode] [sbx run args...]
 #       Starts the daemon if it isn't running, then `sbx run --kit <kit> <args...>`.
-#       Examples:  scripts/goversbx run claude ~/my-project
-#                  scripts/goversbx run --name my-sb claude ~/my-project
-#                  scripts/goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
+#       Examples:  goversbx run claude ~/my-project
+#                  goversbx run --name my-sb claude ~/my-project
+#                  goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
 #       --kit is only added for a NEW sandbox: if the sandbox named by --name (or by the first
 #       positional argument) already exists, the args go to `sbx run` unchanged - add the kit to an
 #       existing sandbox with `sbx kit add` instead.
-#   scripts/goversbx start     start the daemon in the background (no-op if already running)
-#   scripts/goversbx stop      stop a daemon started by this script
-#   scripts/goversbx status    daemon state, ports, log location
-#   scripts/goversbx logs      follow the daemon log
+#   goversbx start     start the daemon in the background (no-op if already running)
+#   goversbx stop      stop a daemon started by this script
+#   goversbx status    daemon state, ports, log location
+#   goversbx logs      follow the daemon log
+#   goversbx version   installed release version ("dev" in a repo checkout)
 #
 # The daemon keeps running after the sandbox session ends - it serves every sandbox; stop it with
-# `scripts/goversbx stop`. It runs for real (GOVERSBX_SBX_DRY_RUN=false) unless you set that
-# yourself; every other GOVERSBX_* variable is passed through to it (see README). The jar is
-# (re)built with Gradle when it is missing or older than daemon/ sources.
+# `goversbx stop` (or `brew services stop goversbx` if Homebrew started it). It runs for real
+# (GOVERSBX_SBX_DRY_RUN=false) unless you set that yourself; every other GOVERSBX_* variable is
+# passed through to it (see README).
+#
+# Two layouts: installed (Homebrew or the release tarball) runs the native `goversbx-daemon` binary
+# next to this script, with kits in ../share/goversbx/kits; a repo checkout (scripts/goversbx) runs
+# the JVM jar instead and (re)builds it with Gradle when it is missing or older than daemon/ sources.
 #
 # Knobs: SBX=sbx, GOVERSBX_KIT=claude (default kit), GOVERSBX_STATE_DIR=~/.local/state/goversbx
-# (pid file + daemon.log), GOVERSBX_SANDBOX_API_PORT=8787, GOVERSBX_ADMIN_PORT=8788.
-# Needs: sbx, java (21+), curl. bash 3.2 compatible (macOS).
+# (pid file + daemon.log), GOVERSBX_SANDBOX_API_PORT=8787, GOVERSBX_ADMIN_PORT=8788,
+# GOVERSBX_DAEMON_BIN / GOVERSBX_KITS_DIR (override where the daemon binary and the kits are).
+# Needs: sbx, curl; java (21+) only in a repo checkout. bash 3.2 compatible (macOS).
 
 set -u
 
 SBX="${SBX:-sbx}"
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve symlinks by hand (macOS before 13 has no `realpath`, its `readlink` no `-f`).
+SELF="$0"
+while [ -L "$SELF" ]; do
+  link="$(readlink "$SELF")"
+  case "$link" in /*) SELF="$link" ;; *) SELF="$(dirname "$SELF")/$link" ;; esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 JAR="$REPO_DIR/daemon/build/libs/goversbx-daemon.jar"
+DAEMON_BIN="${GOVERSBX_DAEMON_BIN:-}"
+[ -z "$DAEMON_BIN" ] && [ -x "$SCRIPT_DIR/goversbx-daemon" ] && DAEMON_BIN="$SCRIPT_DIR/goversbx-daemon"
+if [ -n "${GOVERSBX_KITS_DIR:-}" ]; then
+  KITS_DIR="$GOVERSBX_KITS_DIR"
+elif [ -d "$SCRIPT_DIR/../share/goversbx/kits" ]; then
+  KITS_DIR="$(cd "$SCRIPT_DIR/../share/goversbx/kits" && pwd)"
+else
+  KITS_DIR="$REPO_DIR/sandbox-kit/kits"
+fi
 STATE_DIR="${GOVERSBX_STATE_DIR:-$HOME/.local/state/goversbx}"
 PID_FILE="$STATE_DIR/daemon.pid"
 LOG_FILE="$STATE_DIR/daemon.log"
@@ -71,7 +93,7 @@ start_daemon() {
     pid="$(daemon_pid)" && say "daemon already running (pid $pid), admin UI $ADMIN" \
       || say "daemon already running (not started by this script), admin UI $ADMIN"
     # A daemon started before the last code change keeps running the old build.
-    if [ -f "$PID_FILE" ] && { [ "$JAR" -nt "$PID_FILE" ] \
+    if [ -z "$DAEMON_BIN" ] && [ -f "$PID_FILE" ] && { [ "$JAR" -nt "$PID_FILE" ] \
          || [ -n "$(find "$REPO_DIR/daemon/src" "$REPO_DIR/daemon/build.gradle.kts" -newer "$PID_FILE" -print -quit)" ]; }; then
       say "WARNING: the running daemon is older than the daemon code - restart it: scripts/goversbx stop && scripts/goversbx start"
     fi
@@ -80,12 +102,17 @@ start_daemon() {
   for port in "$SANDBOX_API_PORT" "$ADMIN_PORT"; do
     port_taken "$port" && die "port $port is in use by something that isn't a healthy goversbx daemon"
   done
-  command -v java >/dev/null 2>&1 || die "java not found on PATH (JDK 21+ needed)"
   command -v "$SBX" >/dev/null 2>&1 || die "'$SBX' not found on PATH"
-  build_if_needed
+  if [ -n "$DAEMON_BIN" ]; then
+    set -- "$DAEMON_BIN"
+  else
+    command -v java >/dev/null 2>&1 || die "java not found on PATH (JDK 21+ needed in a repo checkout)"
+    build_if_needed
+    set -- java -jar "$JAR"
+  fi
   GOVERSBX_SBX_DRY_RUN="${GOVERSBX_SBX_DRY_RUN:-false}" \
   GOVERSBX_SBX_BINARY="${GOVERSBX_SBX_BINARY:-$SBX}" \
-    nohup java -jar "$JAR" >>"$LOG_FILE" 2>&1 </dev/null &
+    nohup "$@" >>"$LOG_FILE" 2>&1 </dev/null &
   pid=$!
   echo "$pid" >"$PID_FILE"
   for _ in $(seq 1 30); do
@@ -106,7 +133,7 @@ stop_daemon() {
     rm -f "$PID_FILE"
     say "daemon stopped (pid $pid)"
   elif healthy; then
-    die "a daemon is running on $ADMIN but wasn't started by this script - stop it where it was started"
+    die "a daemon is running on $ADMIN but wasn't started by this script - stop it where it was started (Homebrew: brew services stop goversbx)"
   else
     say "daemon not running"
   fi
@@ -133,10 +160,10 @@ target_sandbox() {
 
 run_sandbox() {
   local kit="${GOVERSBX_KIT:-claude}" kit_dir target
-  if [ "${1:-}" = --goversbx-kit ]; then kit="${2:?--goversbx-kit needs claude, pi or omp}"; shift 2; fi
-  kit_dir="$REPO_DIR/sandbox-kit/kits/goversbx-$kit"
+  if [ "${1:-}" = --goversbx-kit ]; then kit="${2:?--goversbx-kit needs claude, pi, omp or opencode}"; shift 2; fi
+  kit_dir="$KITS_DIR/goversbx-$kit"
   [ -f "$kit_dir/spec.yaml" ] || die "unknown kit '$kit' (no $kit_dir/spec.yaml)"
-  [ $# -gt 0 ] || die "usage: scripts/goversbx run [--goversbx-kit claude|pi|omp] [sbx run args...]  e.g. run claude ~/my-project"
+  [ $# -gt 0 ] || die "usage: goversbx run [--goversbx-kit claude|pi|omp|opencode] [sbx run args...]  e.g. run claude ~/my-project"
 
   start_daemon || exit 1
 
@@ -165,5 +192,8 @@ case "$cmd" in
     fi
     echo "admin UI: $ADMIN   sandbox port: $SANDBOX_API_PORT   log: $LOG_FILE" ;;
   logs) exec tail -f "$LOG_FILE" ;;
-  *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 1 ;;
+  version|--version)
+    if [ -f "$SCRIPT_DIR/../share/goversbx/VERSION" ]; then cat "$SCRIPT_DIR/../share/goversbx/VERSION"
+    else echo "dev ($REPO_DIR)"; fi ;;
+  *) sed -n '2,32p' "$SELF" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 1 ;;
 esac
