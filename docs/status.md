@@ -166,6 +166,33 @@ placeholder derived from the sandbox name in each kit startup script (e.g.
 `goversbx-ph-$SANDBOX_NAME`), with the daemon recognizing any `goversbx-ph-*` value as unregistered -
 still unforgeable as long as a sandbox-scoped secret only applies to that sandbox's own traffic.
 
+## In progress: nested sbx dev sandbox (2026-10-14)
+
+Goal: let the agent test against a real `sbx` itself instead of handing every host run to the user.
+`claude-goversbx` (the current dev sandbox) has no KVM (`kvm: HYP mode not available`). sbx has an
+experimental nested-virtualization option (docker/sbx-releases#497, macOS Apple Silicon M3+; the
+user's Mac is an M5):
+
+```bash
+# on the host
+sbx settings set feature.sandbox-nested '{"enabled":true}'
+scripts/goversbx run --name goversbx-dev --nested claude ~/IdeaProjects/goversbx
+# fallback if `sbx run` doesn't take --nested:
+#   sbx create --nested --kit sandbox-kit/kits/goversbx-claude --name goversbx-dev claude ~/IdeaProjects/goversbx
+```
+
+Plan inside `goversbx-dev` (an agent resuming here should do this):
+1. Check `/dev/kvm` exists (and `dmesg | grep -i kvm` doesn't say "HYP mode not available").
+2. Install the Linux sbx (arm64 Ubuntu deb; README: `curl -fsSL https://get.docker.com | sudo
+   REPO_ONLY=1 sh && sudo apt-get install docker-sbx && sudo usermod -aG kvm $USER`). Request the
+   needed hosts through goversbx - this sandbox has the kit.
+3. The user runs `sbx login` once (`! sbx login`), if required.
+4. Run an inner daemon against the inner sbx (other ports, e.g. 9787/9788) and the e2e script with
+   `SBX=sbx` against inner sandboxes. Then: deny-rule detection, pi/omp kits.
+
+Caveat: the inner sbx is the Linux build, so proxy details (e.g. `host.docker.internal` seen as
+`localhost`) may differ from macOS; the user's host stays the reference for final confirmation.
+
 ## What exists
 
 One deployable, `daemon/` (Java 21 bytecode, Gradle 9.8.1 wrapper), plus `sandbox-kit/`
