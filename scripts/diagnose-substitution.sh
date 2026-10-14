@@ -92,16 +92,19 @@ while IFS='|' read -r label host; do
   p="gvdiag-$label-$RANDOM$RANDOM"
   PLACEHOLDERS="$PLACEHOLDERS $p"
   eval "PH_$label=\$p"
-  out="$("$SBX" secret set-custom --sandbox "$SB" --host "$host" --env "GOVERSBX_DIAG_$label" \
+  envname="GOVERSBX_DIAG_$(echo "$label" | tr '[:lower:]' '[:upper:]')"   # sbx requires ^[A-Z_][A-Z0-9_]*$
+  out="$("$SBX" secret set-custom --sandbox "$SB" --host "$host" --env "$envname" \
     --placeholder "$p" --value "SUBSTITUTED-$label" 2>&1)" && status=ok || status="FAILED: $out"
+  eval "REG_$label=\$status"
   say "  $label --host $host -> $status"
   CURL_HEADERS="$CURL_HEADERS -H 'X-Diag-$label: $p'"
 done <<EOF
 $VARIANTS
 EOF
 pH="gvdiag-https-$RANDOM$RANDOM"; PLACEHOLDERS="$PLACEHOLDERS $pH"
-out="$("$SBX" secret set-custom --sandbox "$SB" --host "$HTTPS_HOST" --env GOVERSBX_DIAG_https \
+out="$("$SBX" secret set-custom --sandbox "$SB" --host "$HTTPS_HOST" --env GOVERSBX_DIAG_HTTPS \
   --placeholder "$pH" --value "SUBSTITUTED-https" 2>&1)" && status=ok || status="FAILED: $out"
+REG_https="$status"
 say "  https --host $HTTPS_HOST -> $status"
 say "env in sandbox (placeholders visible?): $(in_sb 'env | grep GOVERSBX_DIAG_ | sort | tr "\n" " "')"
 sleep 3
@@ -113,7 +116,10 @@ resp="$(in_sb "curl -sS --max-time 15 \"\$ECHO_URL/diag\" $CURL_HEADERS -H 'Auth
 echo "$resp" > "$RUN_DIR/plain-http.json"
 while IFS='|' read -r label host; do
   got="$(echo "$resp" | jq -r --arg h "x-diag-$label" '.headers[$h] // "<missing>"' 2>/dev/null)"
+  eval "reg=\$REG_$label"
+  [ "$reg" = ok ] || got="NOT-REGISTERED"
   case "$got" in
+    NOT-REGISTERED) verdict="n/a - registration failed, see above" ;;
     "SUBSTITUTED-$label") verdict="SUBSTITUTED" ;;
     gvdiag-*) verdict="raw placeholder" ;;
     *) verdict="?? ($got)" ;;
@@ -123,13 +129,15 @@ done <<EOF
 $VARIANTS
 EOF
 auth="$(echo "$resp" | jq -r '.headers.authorization // "<missing>"' 2>/dev/null)"
-say "  Authorization: Bearer <v6 placeholder> arrived as: $auth"
+if [ "$REG_v6" = ok ]; then say "  Authorization: Bearer <v6 placeholder> arrived as: $auth"
+else say "  Authorization check: n/a - v6 registration failed"; fi
 [ -z "$(echo "$resp" | jq -r '.method' 2>/dev/null)" ] && say "  (no JSON from echo server - raw response: $resp)"
 
 hdr "HTTPS sanity check: https://$HTTPS_HOST/headers"
 hresp="$(in_sb "curl -sS --max-time 20 https://$HTTPS_HOST/headers -H 'X-Diag-Https: $pH'")"
 echo "$hresp" > "$RUN_DIR/https.json"
-if echo "$hresp" | grep -q "SUBSTITUTED-https"; then say "  X-Diag-Https: SUBSTITUTED"
+if [ "$REG_https" != ok ]; then say "  n/a - registration failed, see above"
+elif echo "$hresp" | grep -q "SUBSTITUTED-https"; then say "  X-Diag-Https: SUBSTITUTED"
 elif echo "$hresp" | grep -q "$pH"; then say "  X-Diag-Https: raw placeholder"
 else say "  inconclusive - response: $(echo "$hresp" | head -c 300)"; fi
 

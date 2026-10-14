@@ -54,7 +54,8 @@ case "$cmd" in
         # the way sbx does, so a wrong flag in the daemon shows up here too.
         while [ $# -gt 0 ]; do
           case "$1" in
-            --sandbox) n="$2";; --value) v="$2";; --host|--env|--placeholder) ;;
+            --sandbox) n="$2";; --value) v="$2";; --host|--placeholder) ;;
+            --env) [[ "$2" =~ ^[A-Z_][A-Z0-9_]*$ ]] || { echo "error: invalid env name \"$2\": expected pattern ^[A-Z_][A-Z0-9_]*\$"; exit 1; } ;;
             *) echo "error: unknown flag: $1"; echo "  try: sbx secret set-custom --help"; exit 1 ;;
           esac; shift 2
         done
