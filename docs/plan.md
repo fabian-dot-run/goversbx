@@ -441,3 +441,34 @@ Sources consulted (via `gh api`, not search-engine summaries, after confirming `
 access): [`docker/sbx-releases` releases](https://github.com/docker/sbx-releases/releases)
 (specifically the entries documenting live secret updates and the `sbx ls` v0.48.0 JSON shape
 change), plus the user's own pasted `sbx ls --format json` output for the real field names.
+
+## Revision (2026-10-14): support agents other than Claude Code - pi first
+
+The daemon was already agent-agnostic: anything that speaks MCP over Streamable HTTP and sends the
+placeholder header works, and the sbx proxy's substitution happens at the network layer regardless
+of which process sent the request. Only `sandbox-kit` was Claude-specific (`claude mcp add`).
+
+- `sandbox-kit` is restructured into a shared `skill/` plus `agents/<agent>/{startup.sh,
+  manifest-fragment.json}`. The old `startup/000-cmd.sh` is now `agents/claude/startup.sh`,
+  unchanged in behavior. `packageKit` bundles `skill/` and `agents/`.
+- `agents/pi/startup.sh`: pi supports MCP in core since 1.0 (2026-10-01). Facts taken from pi's own
+  `packages/coding-agent/docs/mcp.md` (fetched via `gh api`): user-level servers live in
+  `~/.pi/agent/mcp.json` under `mcpServers`, HTTP servers take `url` + `headers`; header values
+  interpolate `${VAR}` and run `!command`; `pi mcp add` has no `--header` flag; a project's
+  `.pi/mcp.json` is only read once the project is trusted; tools default to `codemode` exposure
+  (callable from scripts, not declared to the model), `direct` declares them like built-ins; pi
+  also scans `~/.agents/skills/` (from pi's `docs/skills.md`). The script therefore merges a
+  `goversbx-network` entry with `"exposure": "direct"` and the hardcoded placeholder into the
+  user-level file using Node (part of the pi image), keeping other entries and failing on a
+  malformed file instead of overwriting it, then copies the shared skill to
+  `~/.agents/skills/`.
+- `SKILL.md` now says tools may appear with a server prefix (pi names them
+  `mcp__goversbx-network__<tool>`) instead of assuming bare names.
+
+Verification: the pi script was run against a fresh home, an existing config with another server
+(preserved, and idempotent on a second run), and a malformed config (exit 1, file untouched). It
+was **not** run against a real pi installation: `registry.npmjs.org` is blocked from this sandbox,
+so `pi mcp list` couldn't confirm pi accepts the generated entry.
+
+Sources: [earendil-works/pi `docs/mcp.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md),
+pi `docs/skills.md`, [docker/sbx-kits-contrib `pi` kit](https://github.com/docker/sbx-kits-contrib/tree/main/pi).

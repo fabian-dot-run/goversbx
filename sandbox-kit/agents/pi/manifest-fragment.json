@@ -3,9 +3,9 @@
   "kits": ["goversbx"],
   "commands": [
     {
-      "command": ["/bin/sh", "/etc/durable-startup.d/NNN-goversbx/000-cmd.sh"],
+      "command": ["/bin/sh", "/etc/durable-startup.d/NNN-goversbx/agents/pi/startup.sh"],
       "user": "agent",
-      "description": "Register the goversbx-network MCP endpoint (HTTP, served by the daemon) for this sandbox"
+      "description": "Register the goversbx-network MCP endpoint with pi and install the goversbx-network-access skill"
     }
   ]
 }

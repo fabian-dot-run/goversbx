@@ -17,7 +17,7 @@ revisions that moved the MCP server into the daemon and added verified sandbox i
 | Module        | Runs where              | Purpose                                                             |
 |---------------|--------------------------|-----------------------------------------------------------------------|
 | `daemon`      | host, outside sandboxes | Everything: the approval workflow, the MCP endpoint, and sandbox-identity registration, as three bounded contexts (see below) |
-| `sandbox-kit` | packaging only           | `SKILL.md` + draft durable-startup hook, bundled into a zip            |
+| `sandbox-kit` | packaging only           | Shared `SKILL.md` + one draft durable-startup script per agent (Claude Code, pi), bundled into a zip |
 
 ### Inside `daemon`: bounded contexts, hexagonal layering
 
@@ -71,7 +71,7 @@ on `PATH`) to apply real changes.
 
 ### Sandbox identity
 
-Every sandbox's `claude mcp add` registration sends the *same hardcoded placeholder literal*
+Every sandbox's MCP registration (whatever the agent) sends the *same hardcoded placeholder literal*
 (`goversbx-sandbox-identity-placeholder-v1`) as `X-Goversbx-Sandbox-Name` - never the real name,
 and never read from a per-sandbox env var (see `docs/plan.md`'s third 2026-10-14 revision for why
 a hardcoded literal, not an env-var lookup, is the whole point). The first time the daemon sees
@@ -107,9 +107,17 @@ Exposes two tools: `request_network_access(host, reason, timeoutSeconds?)` and
 ./gradlew :sandbox-kit:packageKit
 ```
 
-Produces `sandbox-kit/build/distributions/goversbx-sandbox-kit-*.zip` containing `SKILL.md` and a
-**draft** durable-startup command that registers the MCP endpoint - the real host-side mechanism
-for registering a new `sbx` kit still needs to be confirmed (see `docs/plan.md`, open questions).
+Produces `sandbox-kit/build/distributions/goversbx-sandbox-kit-*.zip` containing the shared
+`skill/` and one **draft** durable-startup script per agent under `agents/<agent>/`:
+
+| Agent | What its `startup.sh` does |
+|-------|----------------------------|
+| `claude` (Claude Code) | `claude mcp add --transport http --header ...` |
+| `pi` (pi >= 1.0) | Merges a `goversbx-network` entry (`"exposure": "direct"`) into `~/.pi/agent/mcp.json`, copies the skill to `~/.agents/skills/` |
+
+The daemon doesn't care which agent is calling, so supporting another agent only means adding a
+directory under `sandbox-kit/agents/`. The real host-side mechanism for registering a new `sbx` kit
+still needs to be confirmed (see `docs/plan.md`, open questions).
 
 ## Status
 

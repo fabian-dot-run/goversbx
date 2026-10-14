@@ -12,6 +12,9 @@ looping on retries.
 
 ## Tools
 
+The server provides two tools. Depending on your agent, they may appear with a server prefix
+(for example `mcp__goversbx-network__request_network_access`) - they are the same tools.
+
 - **`request_network_access(host, reason, timeoutSeconds?)`** — asks a human to approve or deny
   access to `host`. Give a specific, honest `reason` — it's the only context the human sees when
   deciding. This call waits up to `timeoutSeconds` (default 45, max 120) for a decision:

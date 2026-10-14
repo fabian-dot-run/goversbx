@@ -93,12 +93,14 @@ per-sandbox, and - this is the important part - **confirmed to apply to already-
 without a restart** (checked directly against `docker/sbx-releases`' GitHub release notes via
 `gh api`, not a search summary). That last point is why registration can be fully reactive:
 
-- `sandbox-kit/startup/000-cmd.sh`'s `--header` value is a **hardcoded literal**
-  (`goversbx-sandbox-identity-placeholder-v1`), never read from an env var. `claude mcp add
-  --header` resolves its value once, at registration time, and freezes it into `~/.claude.json` -
-  a per-sandbox env var that didn't exist yet at that moment would be frozen in as empty forever.
-  A shared hardcoded literal has no such timing dependency: the daemon-side substitution rule can
-  start applying at any later point, live.
+- Every agent's startup script (`sandbox-kit/agents/<agent>/startup.sh`) sends the same
+  **hardcoded literal** (`goversbx-sandbox-identity-placeholder-v1`) as the header value, never
+  read from an env var. `claude mcp add --header` resolves its value once, at registration time,
+  and freezes it into `~/.claude.json` - a per-sandbox env var that didn't exist yet at that moment
+  would be frozen in as empty forever. A shared hardcoded literal has no such timing dependency:
+  the daemon-side substitution rule can start applying at any later point, live. For pi, the
+  literal must additionally never contain `${` or start with `!` - pi interpolates env vars and
+  runs commands in MCP header values.
 - `McpContext.SANDBOX_NAME_HEADER`'s value arriving **unchanged** (still equal to the literal
   placeholder) is the signal that a sandbox isn't registered yet -
   `SandboxIdentityApi.isUnsubstitutedPlaceholder(...)`. `RequestNetworkAccessTool` checks this
@@ -160,13 +162,28 @@ Central).
   passed to the transport provider's builder - this is how request-scoped data gets into a tool
   call now that there's no per-process env var to read.
 
-## Sandbox-kit caveat
+## Sandbox kit
 
-Everything under `sandbox-kit/startup/` is an explicitly-marked **draft**: it mirrors the
-in-sandbox *consumption* shape observed on a running `sbx` sandbox (durable-startup command
-format, `claude mcp add --transport http` registration, `~/.claude/skills/synced/` layout), but
-the host-side mechanism for actually registering a new kit/skill bucket with `sbx` has not been
-confirmed. Don't remove the "DRAFT" markers or treat these files as settled without checking
-against real `sbx` docs/source first (see `docs/plan.md`, open question 2 / milestone M4). There is
-no jar or launcher script to package anymore - `sandbox-kit/build.gradle.kts`'s `packageKit` task
-only bundles `skill/` and `startup/`.
+Layout: one shared skill (`sandbox-kit/skill/goversbx-network-access/SKILL.md`) plus one
+directory per agent under `sandbox-kit/agents/<agent>/` (`startup.sh` + `manifest-fragment.json`).
+The daemon is agent-agnostic - anything that speaks MCP over Streamable HTTP and sends the
+placeholder header works - so adding an agent means adding a directory here, not touching
+`daemon/`. `packageKit` bundles `skill/` and `agents/` and marks every `*.sh` executable.
+
+- `agents/claude/` registers via `claude mcp add --transport http --header ...`.
+- `agents/pi/` (pi >= 1.0, MCP in core) merges a `goversbx-network` entry into
+  `~/.pi/agent/mcp.json` with Node, keeping other entries and failing on a malformed file rather
+  than overwriting it. It uses the user-level file because pi only reads a project's `.pi/mcp.json`
+  after the project is trusted, and `"exposure": "direct"` because pi's default (`codemode`)
+  hides MCP tools from the model's tool list. It also copies the skill into `~/.agents/skills/`.
+  `pi mcp add` has no `--header` flag, which is why the JSON is edited directly.
+- The skill names tools without assuming a prefix: pi exposes them as
+  `mcp__goversbx-network__<tool>`.
+
+Everything under `agents/` is an explicitly-marked **draft**: it mirrors the in-sandbox
+*consumption* shape observed on a running `sbx` sandbox (durable-startup command format, the
+agents' own MCP config formats), but the host-side mechanism for actually registering a new kit
+with `sbx` has not been confirmed. Don't remove the "DRAFT" markers or treat these files as
+settled without checking against real `sbx` docs first (see `docs/plan.md`, open question 2 /
+milestone M4). The pi script's config merging is tested against fresh, existing, and malformed
+configs, but has not been run against a real pi installation.

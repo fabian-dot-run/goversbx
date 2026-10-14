@@ -1,7 +1,7 @@
-// Not a compiled Java module - just packages the sandbox-customization assets (skill,
-// durable-startup draft) into one distributable zip, ready to hand to whatever the real
-// host-side sbx kit mechanism turns out to be. No jar/launcher needed anymore - the MCP
-// server lives in the daemon now and sandboxes reach it over HTTP, like mcp-gateway.
+// Not a compiled Java module - just packages the sandbox-customization assets (the shared skill
+// plus one durable-startup draft per agent under agents/<name>/) into one distributable zip, ready
+// to hand to whatever the real host-side sbx kit mechanism turns out to be. No jar/launcher - the
+// MCP server lives in the daemon and sandboxes reach it over HTTP, like mcp-gateway.
 
 plugins {
     base
@@ -14,8 +14,13 @@ val packageKit = tasks.register<Zip>("packageKit") {
     from("skill") {
         into("skill")
     }
-    from("startup") {
-        into("startup")
+    from("agents") {
+        into("agents")
+        filesMatching("**/*.sh") {
+            permissions {
+                unix("755")
+            }
+        }
     }
 }
 
