@@ -1,6 +1,6 @@
 ---
 name: goversbx-network-access
-description: Request outbound network access to a new host from inside this sandbox, with a human approving or denying the request. Use this when a command fails because of a network/proxy block, or before attempting to reach a host you know is not already allowed, instead of giving up or retrying blindly.
+description: Request outbound network access to a new host from inside this sandbox, with a human approving or denying the request. Use this whenever the sandbox proxy blocks a request - an HTTP 403 such as "Approval required for <host>" or "Blocked by network policy ... no matching allow rule" - or before reaching a host you know is not allowed yet. Use it instead of telling the user to run `sbx policy approval ...` or `sbx policy allow ...` themselves, and instead of giving up or retrying blindly.
 ---
 
 # Requesting network access
@@ -8,7 +8,13 @@ description: Request outbound network access to a new host from inside this sand
 This sandbox restricts outbound network access by default. When you hit a blocked request (for
 example a `403` from the sandbox proxy), or you already know you'll need to reach a host that
 probably isn't on the allow list, use the `goversbx-network` MCP server instead of giving up or
-looping on retries.
+looping on retries - and instead of asking the user to approve it with `sbx policy approval ...` /
+`sbx policy allow ...` on their host. This tool *is* that approval path: it reaches the human, waits
+for the decision and applies it. The generic "When a request is blocked" guidance in the sandbox's
+`CLAUDE.md` is the fallback only for when this tool is unavailable.
+
+goversbx can't help with `Blocked by org policy` or `Blocked by local rule for <host>` (deny rules
+win over any approval) - for those, follow the sandbox's own guidance.
 
 ## Tools
 
@@ -34,6 +40,13 @@ you to retry, that's expected for a brand-new sandbox's very first call - just c
 `request_network_access` again with the same arguments after a few seconds. No `requestId` was
 created yet in that case, so retry the original call rather than calling
 `check_network_access_status`.
+
+## Which host to request
+
+Request the exact hostname the failing command used, without scheme, path or port (`www.example.com`,
+not `https://example.com/page`). Approval covers only that host, not its subdomains or parent: if a
+site redirects (`example.com` -> `www.example.com`) or loads from other hosts, the next request is
+blocked again - request that host too, with the same reason.
 
 ## When to use this vs. just retrying
 

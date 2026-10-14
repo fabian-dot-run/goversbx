@@ -208,7 +208,12 @@ header works - so adding an agent means adding a kit here, not touching `daemon/
   --header ... --scope user || true` at **install** time as `agent` - the same race-free pattern the
   sbx `claude` kit uses for `mcp-gateway` (startup commands run from a detached dispatcher and can
   land after the session read its config) - plus an add-only startup fallback. Skill:
-  `files/home/.claude/skills/`.
+  `files/home/.claude/skills/`. A second install command writes a marker-wrapped "use goversbx for
+  blocked hosts" rule into `~/.claude/CLAUDE.md` (user memory, always loaded): the sandbox's own
+  `CLAUDE.md` tells Claude to ask the user to run `sbx policy approval`, and on a real host Claude
+  followed that instead of the skill. A mixin's `agentInstructions` don't help here - they only
+  become a pointer under `## Kits` (progressive disclosure), and the AI file plus `kits-memory/`
+  sit next to the workspace, not in it.
 - `goversbx-pi` (pi >= 1.0, MCP in core; sbx has no pi agent, so no `requires` - layer it onto
   e.g. a `shell` sandbox with pi installed) runs `~/.local/share/goversbx/register-pi-mcp.sh` at
   startup. It merges a `goversbx-network` entry into `~/.pi/agent/mcp.json` with Node, keeping

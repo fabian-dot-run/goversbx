@@ -43,8 +43,10 @@ agentInstructions:
   content: |
     ## Network access via goversbx
 
-    Outbound network access from this sandbox is restricted. If a request is blocked by the sandbox
-    proxy (HTTP 403), or you need a host that is probably not allowed yet, do not give up or retry
-    blindly: call `request_network_access` on the `goversbx-network` MCP server, which asks a human
-    on the host to approve it. Approvals are permanent for this sandbox. The
+    Outbound network access from this sandbox is restricted. If the sandbox proxy blocks a request
+    (HTTP 403, "Approval required for <host>", "Blocked by network policy"), or you need a host that
+    is probably not allowed yet, call `request_network_access` on the `goversbx-network` MCP server
+    instead of asking the user to run `sbx policy approval ...` / `sbx policy allow ...`: it asks the
+    human on the host, waits for the decision and applies it. Approvals are permanent for this
+    sandbox. Not for "Blocked by org policy" or "Blocked by local rule" (deny rules win). The
     `goversbx-network-access` skill has the details.

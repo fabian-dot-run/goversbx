@@ -50,6 +50,35 @@ setup:
           --header "X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1" || true
       user: "agent"
       description: Register the goversbx-network MCP endpoint with claude (install-time, race-free)
+    # Always-loaded rule in Claude's user memory. Needed because the sandbox's own CLAUDE.md
+    # (always loaded) says "Approval required -> ask the user to run sbx policy approval", while a
+    # mixin's agentInstructions only become a pointer under "## Kits" and a skill only loads when
+    # Claude picks it - observed on a real host: Claude followed the sbx text and ignored the skill
+    # until told "use goversbx". Wrapped in markers and replaced on every run, so a recreate never
+    # duplicates it and a user's own ~/.claude/CLAUDE.md content is kept.
+    - command: |
+        set -e
+        f="$HOME/.claude/CLAUDE.md"
+        mkdir -p "$HOME/.claude"
+        touch "$f"
+        sed -i '/<!-- goversbx:start -->/,/<!-- goversbx:end -->/d' "$f"
+        cat >> "$f" <<'GOVERSBX'
+        <!-- goversbx:start -->
+        ## Blocked network access in this sandbox: use goversbx
+
+        This sandbox has the goversbx kit. When the sandbox proxy blocks a request - HTTP 403 with
+        "Approval required for <host>" or "Blocked by network policy ... no matching allow rule" - or
+        you need a host that is probably not allowed yet, do NOT ask the user to run
+        `sbx policy approval ...` or `sbx policy allow ...` themselves. Call `request_network_access`
+        on the `goversbx-network` MCP server instead (skill: `goversbx-network-access`): it asks the
+        human on the host, waits for the decision and applies it, then retry. For this case it
+        supersedes the "When a request is blocked" guidance in the sandbox's CLAUDE.md; fall back to
+        that guidance only if the tool is unavailable, or for "Blocked by org policy" / "Blocked by
+        local rule", which goversbx cannot lift.
+        <!-- goversbx:end -->
+        GOVERSBX
+      user: "agent"
+      description: Tell Claude (user memory) to use goversbx for blocked hosts
   startup:
     # Fallback in case the install-time registration could not run. Add-only, never remove-then-add:
     # the dispatcher may fire while a session is already live.
@@ -69,8 +98,10 @@ agentInstructions:
   content: |
     ## Network access via goversbx
 
-    Outbound network access from this sandbox is restricted. If a request is blocked by the sandbox
-    proxy (HTTP 403), or you need a host that is probably not allowed yet, do not give up or retry
-    blindly: call `request_network_access` on the `goversbx-network` MCP server, which asks a human
-    on the host to approve it. Approvals are permanent for this sandbox. The
+    Outbound network access from this sandbox is restricted. If the sandbox proxy blocks a request
+    (HTTP 403, "Approval required for <host>", "Blocked by network policy"), or you need a host that
+    is probably not allowed yet, call `request_network_access` on the `goversbx-network` MCP server
+    instead of asking the user to run `sbx policy approval ...` / `sbx policy allow ...`: it asks the
+    human on the host, waits for the decision and applies it. Approvals are permanent for this
+    sandbox. Not for "Blocked by org policy" or "Blocked by local rule" (deny rules win). The
     `goversbx-network-access` skill has the details.

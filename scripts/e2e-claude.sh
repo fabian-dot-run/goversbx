@@ -14,8 +14,9 @@
 #      placeholder header): first call -> "please retry" + reactive registration, second call ->
 #      pending request that must carry the REAL sandbox name -> approved by this script via the
 #      admin API -> the daemon's `sbx policy allow` must have worked -> the host becomes reachable
-#   5. checks what the kit installed (MCP registration, skill), then the same flow with real Claude
-#      Code (`claude -p`) on a second host
+#   5. checks what the kit installed (MCP registration, skill, ~/.claude/CLAUDE.md rule), then asks
+#      real Claude Code (`claude -p`) to curl a second blocked host WITHOUT mentioning goversbx - it
+#      must request access through goversbx on its own
 #   6. removes the sandbox and stops the daemon
 #
 # Needs on the host: sbx, java (21+), curl, jq. bash 3.2 compatible (macOS).
@@ -370,13 +371,24 @@ else
     else
       fail "skill missing at ~/.claude/skills/goversbx-network-access/SKILL.md"
     fi
-    out="$("$SBX" exec "$SANDBOX_NAME" sh -c 'grep -rl "goversbx" /home/agent "$WORKSPACE_DIR" --include="*.md" 2>/dev/null | grep -v /skills/ | head -5' 2>&1)"
-    [ -n "$out" ] && info "kit agent instructions found in: $(echo $out)" \
-      || info "no kit agent-instructions file found (optional - the skill is what Claude uses)"
+    if "$SBX" exec "$SANDBOX_NAME" grep -q "goversbx:start" /home/agent/.claude/CLAUDE.md; then
+      pass "kit wrote the 'use goversbx for blocked hosts' rule into ~/.claude/CLAUDE.md"
+    else
+      fail "~/.claude/CLAUDE.md has no goversbx rule - Claude will follow the sbx 'ask the user to approve' text instead"
+    fi
+    # The sandbox's AI file (with the sbx "When a request is blocked" text) sits next to the
+    # workspace, not in it; a mixin's agentInstructions land in kits-memory/ beside it.
+    out="$("$SBX" exec -e "WS=$WORKSPACE" "$SANDBOX_NAME" sh -c \
+      'find "$(dirname "$WS")" /home/agent -maxdepth 3 -path "*kits-memory*" -name "goversbx-claude.md" 2>/dev/null | head -3' 2>&1)"
+    [ -n "$out" ] && info "mixin agent instructions at: $(echo $out)" \
+      || info "mixin agent instructions (kits-memory/goversbx-claude.md) not found - harmless, see ~/.claude/CLAUDE.md rule"
 
-    PROMPT="Use the request_network_access tool of the goversbx-network MCP server to request network access to $CLAUDE_TARGET_HOST with the reason 'goversbx e2e test' and timeoutSeconds 90. If it says the sandbox identity is not registered yet, wait a few seconds and call it again with the same arguments. Do nothing else. Finally print the tool's last response verbatim."
-    "$SBX" exec -e "PROMPT=$PROMPT" "$SANDBOX_NAME" bash -lc \
-      'claude -p "$PROMPT" --allowedTools "mcp__goversbx-network" < /dev/null' >"$RUN_DIR/claude.txt" 2>&1 &
+    # A natural prompt that does NOT mention goversbx, run from the workspace so the sandbox's own
+    # CLAUDE.md (which tells Claude to ask the user to approve via sbx) is loaded too: this checks
+    # that Claude picks goversbx on its own - on a real host it once didn't, until told to.
+    PROMPT="curl https://$CLAUDE_TARGET_HOST and tell me the final HTTP status code."
+    "$SBX" exec -e "PROMPT=$PROMPT" -e "WS=$WORKSPACE" "$SANDBOX_NAME" bash -lc \
+      'cd "$WS" 2>/dev/null; claude -p "$PROMPT" --allowedTools "Bash" "mcp__goversbx-network" "Skill" < /dev/null' >"$RUN_DIR/claude.txt" 2>&1 &
     CLAUDE_PID=$!
 
     approved=0
@@ -396,12 +408,16 @@ else
       fail "claude -p did not finish within ${CLAUDE_TIMEOUT}s"
     fi
     wait "$CLAUDE_PID" 2>/dev/null
-    [ "$approved" = 1 ] || fail "Claude never created a pending request for $CLAUDE_TARGET_HOST"
-    if grep -q "Approved" "$RUN_DIR/claude.txt"; then
-      pass "Claude received 'Approved'"
+    if [ "$approved" = 1 ]; then
+      pass "Claude used goversbx on its own (prompt did not mention it)"
     else
-      fail "Claude's output does not contain 'Approved' (full output: $RUN_DIR/claude.txt)"
+      fail "Claude never created a pending request for $CLAUDE_TARGET_HOST - it did not use goversbx on its own:"
       tail -20 "$RUN_DIR/claude.txt"
+    fi
+    if grep -q "200" "$RUN_DIR/claude.txt"; then
+      pass "Claude retried after the approval and reported 200"
+    else
+      info "Claude's answer does not mention 200 (full output: $RUN_DIR/claude.txt): $(tail -3 "$RUN_DIR/claude.txt")"
     fi
     code="$(sandbox_status_of "$CLAUDE_TARGET_HOST")"
     [ "$code" = 200 ] && pass "$CLAUDE_TARGET_HOST now reachable from the sandbox (HTTP 200)" \

@@ -40,9 +40,16 @@ check passed on the user's host:
   `~/.claude/skills/goversbx-network-access/SKILL.md`;
 - the whole MCP/identity/approval flow from the MVP run, including real Claude Code, unchanged.
 
-Not found: the mixin's `agentInstructions` file (the script's search for "goversbx" in `*.md` under
-`/home/agent` and the workspace came up empty). Harmless - the skill carries the guidance - but where
-sbx writes mixin kits-memory is still unknown.
+**Found in interactive use afterwards:** asked to `curl spiegel.de`, Claude followed the sandbox's
+own `CLAUDE.md` ("Approval required -> ask the user to run `sbx policy approval ...`") and only used
+goversbx when told to. Fix (not yet run on the host): the Claude kit now also writes an always-loaded
+rule into `~/.claude/CLAUDE.md`; the skill description names the proxy's 403 messages and says to use
+it instead of the sbx approval commands, and tells the agent to request redirect targets
+(`spiegel.de` -> `www.spiegel.de`) as separate hosts. e2e step 5 now uses a natural prompt that
+doesn't mention goversbx ("curl https://<host> and tell me the final HTTP status code"), run from
+the workspace, and FAILs if Claude doesn't create a goversbx request on its own. The sandbox's AI
+file sits next to the workspace (`<parent>/CLAUDE.md`, plus `kits-agent-context/`), which is why
+the earlier search for the mixin's `kits-memory` file looked in the wrong place.
 
 The daemon itself can't be started by a kit (kit hooks run inside the sandbox; the daemon needs the
 host's `sbx` CLI and must stay outside the sandbox's control). Instead, the host launcher
@@ -52,7 +59,7 @@ background if needed (builds the jar when stale, real mode, `~/.local/state/gove
 (new/existing sandbox, pi kit, non-default port -> `--kit-arg`, foreign process on the port); **not
 yet run on the host** - it relies on `sbx run` accepting `--kit` like `sbx create` does.
 
-**Next steps**: try `scripts/goversbx run claude <ws>` on the host; pi/oh-my-pi end to end (their
+**Next steps**: rerun `scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their
 kits exist, never applied with real sbx); then the out-of-scope items (persistence, revocation, admin authn).
 
 ### How we got there

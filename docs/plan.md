@@ -604,3 +604,14 @@ host: `run` ensures a healthy daemon (building the jar if stale, starting it in 
 real mode), then execs `sbx run --kit sandbox-kit/kits/goversbx-<kit> ...`; `start|stop|status|logs`
 manage it. The daemon deliberately outlives the session because it serves every sandbox. For an
 existing sandbox `--kit` is left out (`sbx kit add` covers that case).
+
+## Revision (2026-10-14): make Claude pick goversbx without being told
+
+First interactive use via `scripts/goversbx run claude ...`: on a blocked `curl`, Claude followed the
+sbx-provided, always-loaded `CLAUDE.md` section "When a request is blocked" (ask the user to run
+`sbx policy approval ...`) and loaded the skill only after "use goversbx". Skill descriptions and a
+mixin's progressive-disclosure `agentInstructions` lose against always-loaded project memory. The
+Claude kit therefore writes a marker-wrapped rule into `~/.claude/CLAUDE.md` (user memory) at install
+time that explicitly supersedes that section for approvable blocks (not for org-policy or local deny
+rules), and the skill's description now names the proxy's 403 messages. The e2e test's Claude step
+switched to a prompt that doesn't mention goversbx.
