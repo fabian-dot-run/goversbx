@@ -129,7 +129,7 @@ still needs to be confirmed (see `docs/plan.md`, open questions).
 **Current state, the Claude Code MVP test runbook, and open questions: [`docs/status.md`](docs/status.md).**
 End-to-end test against a real sbx host: `scripts/e2e-claude.sh` (run on the host).
 
-Milestones M1–M4 from the original plan, plus the revisions that merged the MCP server into the
+**The Claude Code MVP is verified end to end against a real sbx host (2026-10-14).** Milestones M1–M4 from the original plan, plus the revisions that merged the MCP server into the
 daemon and added reactive, verified sandbox identity via `sbx secret set-custom` + `sbx ls`, are
 all implemented and verified: unit tests for the domain/application layers, `javalin-testtools`
 integration tests for the admin REST API, the registration endpoint, and the real MCP HTTP

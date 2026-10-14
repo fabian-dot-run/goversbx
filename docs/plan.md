@@ -554,3 +554,13 @@ changed from the fictional `daemon.internal` to `host.docker.internal`.
 Still unexplained: in that run, Claude's `claude mcp list` reported "tools fetch failed - Error
 POSTing to endpoint: EOF" once secrets existed; plain curl/Node POSTs through the proxy with such a
 secret present did not reproduce it.
+
+## Revision (2026-10-14): MVP verified end to end
+
+Third real run of `scripts/e2e-claude.sh` (sbx v0.48.0, user's host): reactive registration with
+`--host localhost`, proxy substitution of the shared placeholder (real sandbox name arrives),
+approval -> `sbx policy allow network <host> --sandbox <n>` -> host reachable, identity isolation
+between two sandboxes sharing the placeholder, and the full path with real Claude Code (`claude -p`)
+all passed. The only failures were the script's `sbx policy ls | grep` check, which can't work against
+v0.48's summary output; fixed to use `--format json` and treat reachability as the authority. See
+`docs/status.md` for the current state and next steps.

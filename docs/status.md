@@ -3,9 +3,32 @@
 Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-**Next step: re-run `scripts/e2e-claude.sh` on the sbx host** with the `--host localhost` fix from
-the diagnostic below. Still open from the last run: Claude's "Error POSTing to endpoint: EOF".
-pi/oh-my-pi support exists but is parked until the Claude path works.
+## MVP verified end to end with Claude Code (third real run, 2026-10-14, sbx v0.48.0)
+
+`scripts/e2e-claude.sh` on the user's macOS host, real `sbx`, real Claude Code in throwaway
+sandboxes - every functional check passed:
+
+- reactive registration (`sbx ls` + `sbx secret set-custom --host localhost`) after the first
+  "please retry";
+- the proxy substitutes the shared placeholder: the pending request carried the **real** sandbox name;
+- approval -> daemon's `sbx policy allow network <host> --sandbox <n>` ("Added rule ... [tcp]") ->
+  the host became reachable from that sandbox (HTTP 200);
+- identity isolation: a second sandbox with the **same** placeholder arrived under its own name
+  (sandbox-scoped secrets don't collide despite being keyed by placeholder, #230);
+- real Claude Code (`claude -p`): MCP server `✔ Connected`, tool called, request arrived with the
+  real name, Claude received "Approved", host reachable afterwards. The earlier "Error POSTing to
+  endpoint: EOF" did not recur (cause never pinned down; it appeared only in the run where secrets
+  were registered with the wrong `--host`).
+
+The run's only 2 FAILs were the script's own `sbx policy ls <n> | grep <host>` check: v0.48 prints a
+summary ("allow 12 hosts from ...") instead of hosts. Fixed: it now tries `policy ls --format json`
+and otherwise only notes it - the reachability check is the proof.
+
+**Next steps** (none blocking the Claude MVP): turn `sandbox-kit` into a real sbx kit so new sandboxes
+get the MCP registration + skill automatically (open question 2); then pi/oh-my-pi end to end; then
+the out-of-scope items (persistence, revocation, admin authn).
+
+### How we got there
 
 **Diagnostic result (`scripts/diagnose-substitution.sh`, sbx v0.48.0, user's host):** for plain-HTTP
 traffic from a sandbox to `host.docker.internal:<port>`, `set-custom --host localhost` and `--host **`
