@@ -472,3 +472,28 @@ so `pi mcp list` couldn't confirm pi accepts the generated entry.
 
 Sources: [earendil-works/pi `docs/mcp.md`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/mcp.md),
 pi `docs/skills.md`, [docker/sbx-kits-contrib `pi` kit](https://github.com/docker/sbx-kits-contrib/tree/main/pi).
+
+### Follow-up: oh-my-pi (omp)
+
+`agents/omp/startup.sh`, based on omp's own `docs/mcp-config.md`, `docs/skills.md`,
+`src/discovery/builtin.ts` and `packages/coding-agent/package.json` (all via `gh api`):
+
+- User MCP config is `<agentDir>/mcp.json`, user skills `<agentDir>/skills/<name>/SKILL.md`.
+  `<agentDir>` is profile-scoped: `~/.omp/agent` by default, `~/.omp/profiles/<name>/agent` under
+  `OMP_PROFILE`/`PI_PROFILE` (and then the default profile's files are *not* read);
+  `PI_CODING_AGENT_DIR` overrides the default-profile dir. The script follows these rules, with
+  `OMP_AGENT_DIR` as an explicit override; `PI_CONFIG_DIR` is not handled.
+- Remote servers need `"type": "http"` + `url` + `headers`. Header values: leading `!` runs a
+  command, a value that exactly names a set env var is replaced by it, `${VAR}` is expanded. The
+  placeholder literal is none of these, so it's sent verbatim.
+- omp's `~/.agents/skills` provider is opt-in for user skills, so the skill goes into omp's native
+  skills dir (loaded by default; requires a `description`, which ours has).
+- MCP tools are named `mcp__<server>_<tool>` after sanitizing (`mcp__goversbx_network_<tool>`);
+  the skill already avoids assuming exact names.
+- omp is a Bun app (`"engines": {"bun": ...}`), so Node may be absent: the merge runs with `node`
+  if present, else `bun`, else fails without writing anything.
+
+Verification: fresh home, existing config (other servers and top-level keys like
+`disabledServers` preserved, idempotent), named profile (written to the profile's dir only),
+malformed config (exit 1, untouched), and no JS runtime on `PATH` (exit 1, nothing created). Not
+run against a real omp installation, and the `bun -e` path is untested (no Bun here).

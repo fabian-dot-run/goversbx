@@ -17,7 +17,7 @@ revisions that moved the MCP server into the daemon and added verified sandbox i
 | Module        | Runs where              | Purpose                                                             |
 |---------------|--------------------------|-----------------------------------------------------------------------|
 | `daemon`      | host, outside sandboxes | Everything: the approval workflow, the MCP endpoint, and sandbox-identity registration, as three bounded contexts (see below) |
-| `sandbox-kit` | packaging only           | Shared `SKILL.md` + one draft durable-startup script per agent (Claude Code, pi), bundled into a zip |
+| `sandbox-kit` | packaging only           | Shared `SKILL.md` + one draft durable-startup script per agent (Claude Code, pi, oh-my-pi), bundled into a zip |
 
 ### Inside `daemon`: bounded contexts, hexagonal layering
 
@@ -114,6 +114,7 @@ Produces `sandbox-kit/build/distributions/goversbx-sandbox-kit-*.zip` containing
 |-------|----------------------------|
 | `claude` (Claude Code) | `claude mcp add --transport http --header ...` |
 | `pi` (pi >= 1.0) | Merges a `goversbx-network` entry (`"exposure": "direct"`) into `~/.pi/agent/mcp.json`, copies the skill to `~/.agents/skills/` |
+| `omp` (oh-my-pi) | Merges a `goversbx-network` entry (`"type": "http"`) into `~/.omp/agent/mcp.json` (or the active profile's agent dir), copies the skill to `<agentDir>/skills/` |
 
 The daemon doesn't care which agent is calling, so supporting another agent only means adding a
 directory under `sandbox-kit/agents/`. The real host-side mechanism for registering a new `sbx` kit

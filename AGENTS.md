@@ -177,13 +177,23 @@ placeholder header works - so adding an agent means adding a directory here, not
   after the project is trusted, and `"exposure": "direct"` because pi's default (`codemode`)
   hides MCP tools from the model's tool list. It also copies the skill into `~/.agents/skills/`.
   `pi mcp add` has no `--header` flag, which is why the JSON is edited directly.
+- `agents/omp/` (oh-my-pi) merges a `"type": "http"` entry into `<agentDir>/mcp.json` and copies
+  the skill into `<agentDir>/skills/`. `<agentDir>` is profile-scoped in omp: `~/.omp/agent` by
+  default, `~/.omp/profiles/<name>/agent` under `OMP_PROFILE`/`PI_PROFILE` (omp then ignores the
+  default profile's files), `PI_CODING_AGENT_DIR` overrides the default; `OMP_AGENT_DIR` forces a
+  path. omp's `~/.agents/skills` provider is opt-in for user skills, hence the native skills dir.
+  omp runs on Bun, so the merge uses `node` if present and falls back to `bun`.
 - The skill names tools without assuming a prefix: pi exposes them as
-  `mcp__goversbx-network__<tool>`.
+  `mcp__goversbx-network__<tool>`, omp as `mcp__goversbx_network_<tool>`.
+- Header values are interpreted by some agents: pi and omp expand `${VAR}` and run `!command`,
+  and omp also substitutes a value that is exactly the name of a set env var. Keep the placeholder
+  a plain literal that is none of these.
 
 Everything under `agents/` is an explicitly-marked **draft**: it mirrors the in-sandbox
 *consumption* shape observed on a running `sbx` sandbox (durable-startup command format, the
 agents' own MCP config formats), but the host-side mechanism for actually registering a new kit
 with `sbx` has not been confirmed. Don't remove the "DRAFT" markers or treat these files as
 settled without checking against real `sbx` docs first (see `docs/plan.md`, open question 2 /
-milestone M4). The pi script's config merging is tested against fresh, existing, and malformed
-configs, but has not been run against a real pi installation.
+milestone M4). The pi and omp scripts' config merging is tested against fresh, existing, and
+malformed configs (plus named profiles and a missing JS runtime for omp), but neither has been run
+against a real pi/omp installation.
