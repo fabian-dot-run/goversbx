@@ -264,9 +264,18 @@ bug: `sbx kit validate` failed with `cannot unmarshal !!seq into string` - `setu
 must be a **string** (`sh -c <string>`), not the list form `setup.startup[].command` requires
 (`docker/sbx-kits-contrib` `spec/SPEC-v2.md` §5.6); this kit's `install` entry had copied the
 pi/omp kits' list form, which only ever appears under `startup`, so neither of those kits had hit
-it. Fixed (string form), confirmed on a real sbx host. The other two scripts' install-host fixes
-(above) are not yet independently re-confirmed for real - next step, then step 5 with
-`ANTHROPIC_API_KEY` for all three (the actual autonomous-tool-use proof).
+it. Fixed (string form), confirmed on a real sbx host.
+
+**`scripts/e2e-pi.sh` also passed end to end on the user's host (2026-10-14)**, no further fixes
+needed: kit validate, daemon, sandbox create + pi install (both sandboxes), kit's
+`permissions.network.allow` reaching the daemon, the full curl-driven identity/registration/
+approval/`sbx policy allow`/reachability flow (daemon log shows the real `sbx policy allow network`
+output this time, not a dry run), and 4b's identity-isolation check all passed. Step 5 (real `pi
+--print`) auto-skipped as designed (`ANTHROPIC_API_KEY` not set).
+
+**Remaining**: re-confirm `scripts/e2e-omp.sh` for real after its `registry.npmjs.org` fix (not yet
+independently re-run), then step 5 with `ANTHROPIC_API_KEY` for all three (the actual
+autonomous-tool-use proof - the one thing none of these runs have exercised yet).
 
 ## Paused: nested sbx dev sandbox (2026-10-14)
 
