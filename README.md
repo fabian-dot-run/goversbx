@@ -54,7 +54,7 @@ HTTP endpoint (driven by the MCP Java SDK's own client) against an ephemeral por
 Apple Silicon only. The daemon is a GraalVM native binary - no JVM needed.
 
 ```bash
-brew tap <owner>/goversbx
+brew tap fabian-dot-run/goversbx
 brew install goversbx
 brew services start goversbx        # daemon at login (launchd); or `goversbx start` on demand
 goversbx run claude ~/my-project    # start a sandbox with the kit
