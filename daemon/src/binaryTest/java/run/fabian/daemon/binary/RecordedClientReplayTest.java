@@ -76,6 +76,10 @@ class RecordedClientReplayTest {
                 step.path("headers").fields().forEachRemaining(h -> get.header(h.getKey(), h.getValue().asText()));
                 streams.add(Map.entry(step.path("expectStatus").asInt(),
                         DaemonProcess.HTTP.sendAsync(get.GET().build(), HttpResponse.BodyHandlers.ofString())));
+                // A real client keeps the stream open for a while; replaying the next step (pi's
+                // DELETE) instantly can overtake the GET - the native binary on macOS did, and a
+                // GET for an already-deleted session is rightly a 404.
+                DaemonProcess.sleep(500);
                 continue;
             }
             if (method.equals("DELETE")) {

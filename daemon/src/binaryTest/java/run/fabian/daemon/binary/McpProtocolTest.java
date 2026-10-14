@@ -161,7 +161,7 @@ class McpProtocolTest {
                         .header("Accept", "text/event-stream").header("mcp-session-id", mcp.sessionId)
                         .header("X-Goversbx-Sandbox-Name", "proto-get").GET().build(),
                 HttpResponse.BodyHandlers.ofString());
-        DaemonProcess.sleep(300);
+        DaemonProcess.sleep(500);
         assertFalse(stream.isDone(), "GET stream ended on its own: " + (stream.isDone() ? stream.join().body() : ""));
 
         var delete = DaemonProcess.send(HttpRequest.newBuilder(mcp.endpoint).timeout(Duration.ofSeconds(10))
