@@ -1,0 +1,7 @@
+#!/bin/sh
+# Launches the goversbx-network MCP server (stdio transport).
+# GOVERSBX_DAEMON_URL and SANDBOX_NAME must be fixed in this process's environment
+# by whatever mechanism installs this kit into the sandbox - not inherited from the
+# agent's interactive shell (see plan open question re: $SANDBOX_NAME trust boundary).
+set -e
+exec java -jar /opt/goversbx/goversbx-mcp-server.jar

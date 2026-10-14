@@ -1,0 +1,81 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  color: #1a1a1a;
+}
+
+h1 {
+  margin-bottom: 0;
+}
+
+.subtitle {
+  color: #666;
+  margin-top: 0.25rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.5rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #ddd;
+  vertical-align: top;
+}
+
+th {
+  color: #666;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.empty {
+  color: #888;
+  font-style: italic;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.9rem;
+  margin-right: 0.4rem;
+}
+
+button.approve {
+  background: #1a7f37;
+  color: white;
+}
+
+button.deny {
+  background: #cf222e;
+  color: white;
+}
+
+button:hover {
+  opacity: 0.85;
+}
+
+.status {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status-APPROVED {
+  background: #d4f7dc;
+  color: #116329;
+}
+
+.status-DENIED {
+  background: #ffebe9;
+  color: #82071e;
+}

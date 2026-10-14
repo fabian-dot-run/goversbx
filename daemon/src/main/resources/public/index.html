@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>goversbx — network access requests</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>goversbx</h1>
+  <p class="subtitle">Pending and decided network-access requests from sandboxes</p>
+
+  <section>
+    <h2>Pending</h2>
+    <table id="pending-table">
+      <thead>
+        <tr><th>Sandbox</th><th>Host</th><th>Reason</th><th>Requested</th><th>Decision</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="pending-empty" class="empty" hidden>No pending requests.</p>
+  </section>
+
+  <section>
+    <h2>Decided</h2>
+    <table id="decided-table">
+      <thead>
+        <tr><th>Sandbox</th><th>Host</th><th>Reason</th><th>Status</th><th>Decided</th><th>sbx result</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="decided-empty" class="empty" hidden>No decided requests yet.</p>
+  </section>
+
+  <script src="/app.js"></script>
+</body>
+</html>
