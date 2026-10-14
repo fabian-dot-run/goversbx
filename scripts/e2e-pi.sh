@@ -229,11 +229,16 @@ if out="$(in_sandbox 'command -v node' 2>&1)" && [ -n "$out" ]; then
 else
   die "node not found in the sandbox - the pi kit's MCP merge and pi itself both need it"
 fi
+# The pi kit's permissions.network.allow only covers the daemon host, not general internet access -
+# whatever the sandbox's default sbx policy doesn't already allow (e.g. a fresh deny-all/balanced
+# host) has to be granted explicitly here, same fallback pattern as step 3's daemon-reachability
+# check (docs/plan.md: a prior real run needed registry.npmjs.org approved for this to work).
 for sb in $CREATED_SANDBOXES; do
+  "$SBX" policy allow network "registry.npmjs.org:443" --sandbox "$sb" >/dev/null 2>&1
   if out="$("$SBX" exec "$sb" sh -c "npm install -g $PI_PACKAGE" 2>&1)"; then
     pass "pi ($PI_PACKAGE) installed in $sb"
   else
-    echo "$out"; die "npm install -g $PI_PACKAGE failed in $sb - is registry.npmjs.org allowed for this sandbox?"
+    echo "$out"; die "npm install -g $PI_PACKAGE failed in $sb - registry.npmjs.org is allowed for $sb, check: $out"
   fi
 done
 

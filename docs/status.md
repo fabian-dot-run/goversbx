@@ -228,9 +228,26 @@ sandbox, just the bare command).
   locally, unlike a real sandboxed container) - the smoke test actually installed and then removed
   pi and omp/bun in this dev sandbox each time, which is how the CDN-host finding above was made.
 - `./gradlew check` passes (includes `verifyKitSkills` for the new opencode kit).
-- **Next**: run all three for real against a real sbx host (step 5, the actual autonomous-tool-use
-  proof, needs `ANTHROPIC_API_KEY` there) - the user's host, once nested-sbx or an equivalent
-  real-`sbx` environment is available again.
+
+**First real run (2026-10-14, user's host, sbx):** `scripts/e2e-omp.sh` failed at step 2 twice,
+fixed between runs, not yet re-tried for real:
+- Run 1: `curl -fsSL https://bun.sh/install | bash` got a plain 403 inside the sandbox - the omp
+  kit's `permissions.network.allow` only covers the daemon host, not general internet access, and
+  this host's sbx policy doesn't allow it by default either. Fixed: the script now runs `sbx policy
+  allow network <host>:443 --sandbox <name>` for the install hosts itself, proactively, right after
+  creating each sandbox - the same fallback pattern step 3 already used for daemon reachability.
+  Applied to both `e2e-omp.sh` (`bun.sh`) and `e2e-pi.sh` (`registry.npmjs.org`, which a prior host
+  run already needed per the note above - now automated instead of a manual prerequisite).
+- Run 2 (after that fix): `bun.sh` and `github.com` were now allowed, but bun's own installer
+  downloads the actual release asset from `github.com/oven-sh/bun/releases/...`, which 302-redirects
+  twice - confirmed with a real `curl -L -D -`: `github.com` -> `release-assets.githubusercontent.com`
+  (a signed, time-limited URL, but a **fixed hostname**, same CDN Gradle's wrapper download used
+  earlier in this session - unlike omp's own installer's per-release-random R2 subdomain). Added
+  `release-assets.githubusercontent.com` to the script's proactive allow-list too.
+- Re-verified mechanics with `scripts/testing/fake-sbx` after both fixes (real bun+omp install,
+  cleaned up afterward) - passes. **Not yet re-run for real on the host** - that's the immediate
+  next step, then the same for `e2e-pi.sh` and `e2e-opencode.sh`, then step 5 with
+  `ANTHROPIC_API_KEY` for the actual autonomous-tool-use proof.
 
 ## Paused: nested sbx dev sandbox (2026-10-14)
 
