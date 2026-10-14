@@ -14,6 +14,7 @@ verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 ./gradlew :daemon:shadowJar          # build the daemon fat jar
 ./gradlew :sandbox-kit:packageKit    # build the sandbox customization zip
 scripts/e2e-claude.sh                # end-to-end test on a real sbx HOST (not from inside a sandbox)
+scripts/diagnose-substitution.sh     # on the HOST: which `set-custom --host` forms the proxy substitutes
 ```
 
 `scripts/e2e-claude.sh` takes `SBX=<binary>`; to check changes to the script from inside a sandbox,

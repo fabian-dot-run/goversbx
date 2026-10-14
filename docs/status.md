@@ -3,9 +3,22 @@
 Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-**Next step: re-run `scripts/e2e-claude.sh` on the sbx host** (see "Automated E2E test" below)
-after the fixes from its first real run. The manual runbook further down is the fallback for
-debugging. pi/oh-my-pi support exists but is parked until the Claude path works end to end.
+**Next step: run `scripts/diagnose-substitution.sh` on the sbx host** and adjust how the daemon
+registers identity secrets based on its result (see "Second real run" below). Then re-run
+`scripts/e2e-claude.sh`. pi/oh-my-pi support exists but is parked until the Claude path works.
+
+**Second real run (after the `--host` fix):** registration now succeeds (`sbx secret set-custom
+--sandbox <n> --host host.docker.internal ...` exits 0), but the daemon still receives the **raw
+placeholder** from both test sandboxes - the proxy does not substitute it on plain-HTTP requests to
+`host.docker.internal:8787`. Also new: once the secrets existed, Claude's `claude mcp list` reported
+`! Connected · tools fetch failed — Error POSTing to endpoint: EOF` (it was `✔ Connected` in the
+first run, when registration had failed) - the registered secret seems to change how the proxy
+handles that host. Open hypotheses: the proxy keys plain-HTTP traffic to the host as `localhost`
+(the network rule also had to be `localhost:8787`), or substitution only happens on intercepted
+HTTPS. `scripts/diagnose-substitution.sh` tests exactly that: one sandbox, a header-echo server on
+the host (`scripts/testing/HeaderEcho.java`), one secret per `--host` variant (`host.docker.internal`,
+`localhost`, both with port, `*.docker.internal`, `**`), an HTTPS control against httpbin.org, an
+`Authorization` variant, and curl vs. Node POSTs before/after registration.
 
 ## Automated E2E test
 
