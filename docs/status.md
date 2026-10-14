@@ -256,9 +256,17 @@ fixed between runs, not yet re-tried for real:
   fetches the package from the npm registry same as pi's plain `npm install` does, and that host
   was only in `e2e-pi.sh`'s allow-list, not `e2e-omp.sh`'s. Added `registry.npmjs.org` there too.
 - Re-verified mechanics with `scripts/testing/fake-sbx` after all three fixes (real bun+omp install,
-  cleaned up afterward each time) - passes. **Not yet re-run for real on the host** - that's the
-  immediate next step, then the same for `e2e-pi.sh` and `e2e-opencode.sh`, then step 5 with
-  `ANTHROPIC_API_KEY` for the actual autonomous-tool-use proof.
+  cleaned up afterward each time) - passes. `e2e-omp.sh` itself not yet re-confirmed for real on the
+  host after the registry.npmjs.org fix.
+
+**`scripts/e2e-opencode.sh` passed end to end on the user's host (2026-10-14)**, after one more real
+bug: `sbx kit validate` failed with `cannot unmarshal !!seq into string` - `setup.install[].command`
+must be a **string** (`sh -c <string>`), not the list form `setup.startup[].command` requires
+(`docker/sbx-kits-contrib` `spec/SPEC-v2.md` §5.6); this kit's `install` entry had copied the
+pi/omp kits' list form, which only ever appears under `startup`, so neither of those kits had hit
+it. Fixed (string form), confirmed on a real sbx host. The other two scripts' install-host fixes
+(above) are not yet independently re-confirmed for real - next step, then step 5 with
+`ANTHROPIC_API_KEY` for all three (the actual autonomous-tool-use proof).
 
 ## Paused: nested sbx dev sandbox (2026-10-14)
 
