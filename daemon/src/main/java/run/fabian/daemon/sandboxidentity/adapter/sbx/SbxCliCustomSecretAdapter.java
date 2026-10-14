@@ -50,7 +50,9 @@ public final class SbxCliCustomSecretAdapter implements SbxCustomSecretPort {
             }
             int exitCode = process.waitFor();
             boolean applied = exitCode == 0;
-            if (!applied) {
+            if (applied) {
+                log.info("sbx secret set-custom registered sandbox={} target={}", sandboxName, targetHost);
+            } else {
                 log.warn("sbx secret set-custom failed (exit {}) for sandbox={}: {}", exitCode, sandboxName, output);
             }
             return new Result(applied, output);

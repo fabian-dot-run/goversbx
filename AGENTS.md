@@ -13,7 +13,12 @@ verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 ./gradlew :daemon:test               # unit + fast integration tests only
 ./gradlew :daemon:shadowJar          # build the daemon fat jar
 ./gradlew :sandbox-kit:packageKit    # build the sandbox customization zip
+scripts/e2e-claude.sh                # end-to-end test on a real sbx HOST (not from inside a sandbox)
 ```
+
+`scripts/e2e-claude.sh` takes `SBX=<binary>`; to check changes to the script from inside a sandbox,
+run it against the stub `scripts/testing/fake-sbx` (usage in its header). Keep `e2e-claude.sh` bash
+3.2 compatible - the host is macOS (no `timeout`, no bash 4 features).
 
 ### JDK/Gradle quirks (don't "fix" these without reason)
 

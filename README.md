@@ -123,6 +123,7 @@ still needs to be confirmed (see `docs/plan.md`, open questions).
 ## Status
 
 **Current state, the Claude Code MVP test runbook, and open questions: [`docs/status.md`](docs/status.md).**
+End-to-end test against a real sbx host: `scripts/e2e-claude.sh` (run on the host).
 
 Milestones M1–M4 from the original plan, plus the revisions that merged the MCP server into the
 daemon and added reactive, verified sandbox identity via `sbx secret set-custom` + `sbx ls`, are

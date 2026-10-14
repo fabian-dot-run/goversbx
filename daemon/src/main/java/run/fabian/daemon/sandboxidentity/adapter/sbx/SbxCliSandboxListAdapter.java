@@ -50,7 +50,9 @@ public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
                 log.warn("sbx ls failed (exit {}): {}", exitCode, output);
                 return List.of();
             }
-            return parseRunningSandboxNames(output, mapper);
+            List<String> running = parseRunningSandboxNames(output, mapper);
+            log.info("sbx ls: running sandboxes {}", running);
+            return running;
         } catch (Exception e) {
             log.error("Failed to invoke sbx ls", e);
             return List.of();

@@ -43,7 +43,9 @@ public final class SbxCliPolicyAdapter implements SbxPolicyPort {
             }
             int exitCode = process.waitFor();
             boolean applied = exitCode == 0;
-            if (!applied) {
+            if (applied) {
+                log.info("sbx policy allow network {} --sandbox {} succeeded", host, sandboxName);
+            } else {
                 log.warn("sbx policy allow failed (exit {}) for sandbox={} host={}: {}", exitCode, sandboxName, host, output);
             }
             return new Result(applied, output);

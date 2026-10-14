@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Minimal stand-in for `sbx` to smoke-test scripts/e2e-claude.sh mechanics without a real sbx host:
+#
+#   FAKE_SBX_STATE=$(mktemp -d) SBX=scripts/testing/fake-sbx SANDBOX_DAEMON_HOST=localhost \
+#     SKIP_CLAUDE=1 scripts/e2e-claude.sh
+#
+# "Sandboxes" are just names; `exec` runs locally. Simulates proxy placeholder substitution:
+# once `secret set-custom --sandbox N ... --placeholder P --value V` ran, `exec N` sees PLACEHOLDER=V
+# (set FAKE_SBX_NO_SUBSTITUTION=1 to simulate the proxy not substituting). Reachability probes
+# (`curl -w %{http_code} https://HOST`) are answered from the recorded policy (200 if allowed for that
+# sandbox, else 403), so no real blocked requests - and no approval prompts on the host - are made.
+# Keep SKIP_CLAUDE=1: the Claude step would modify the real ~/.claude.json of whoever runs it.
+STATE="${FAKE_SBX_STATE:?}"
+mkdir -p "$STATE"
+cmd="$1"; shift
+case "$cmd" in
+  create)
+    [ "$1" = --name ] && name="$2"
+    echo "$name" >> "$STATE/sandboxes"; echo "created $name" ;;
+  ls)
+    printf '['; first=1
+    while read -r n; do [ $first = 1 ] || printf ','; first=0
+      printf '{"name":"%s","id":"x","agent":"claude","status":"running","workspaces":[],"created_at":"2026-10-14T00:00:00Z"}' "$n"
+    done < "$STATE/sandboxes"; echo ']' ;;
+  exec)
+    envs=()
+    while [ "$1" = -e ]; do envs+=("$2"); shift 2; done
+    name="$1"; shift
+    # Emulate sbx network policy for the script's "is https://HOST reachable" probes, so the smoke
+    # test never sends real blocked requests (which would raise approval prompts on the host).
+    if [[ "$*" == *"%{http_code}"* && "$*" =~ https://([^[:space:]]+) ]]; then
+      host="${BASH_REMATCH[1]}"
+      if grep -q "^$host $name\$" "$STATE/policy" 2>/dev/null; then echo 200; else echo 403; fi
+      exit 0
+    fi
+    sub=""; [ -z "${FAKE_SBX_NO_SUBSTITUTION:-}" ] && [ -f "$STATE/secret-$name" ] && sub="PLACEHOLDER=$(cat "$STATE/secret-$name")"
+    env "${envs[@]}" $sub "$@" ;;
+  rm) echo "removed" ;;
+  policy)
+    sub="$1"; shift
+    case "$sub" in
+      allow) echo "$2 $4" >> "$STATE/policy"; echo "allowed $2 for $4" ;;
+      ls) grep " $1\$" "$STATE/policy" 2>/dev/null ;;
+    esac ;;
+  secret)
+    # secret set-custom --sandbox N --target T --env E --placeholder P --value V
+    shift; while [ $# -gt 0 ]; do case "$1" in --sandbox) n="$2";; --value) v="$2";; esac; shift 2; done
+    echo "$v" > "$STATE/secret-$n"; echo "secret set for $n" ;;
+  *) echo "fake sbx: unsupported $cmd" >&2; exit 1 ;;
+esac

@@ -1,10 +1,37 @@
 # Implementation status
 
-Snapshot as of 2026-10-14, commit `b9f5dd8`. This is the place to resume from. `docs/plan.md` has
-the full history and rationale (dated revision sections); `AGENTS.md` has the conventions.
+Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
+and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-**Next step: manual end-to-end MVP test with Claude Code in a real `sbx` sandbox** (runbook below).
-pi/oh-my-pi support exists but is parked until the Claude path works end to end.
+**Next step: run `scripts/e2e-claude.sh` on the sbx host** (see "Automated E2E test" below) - the
+first run of everything against real `sbx`. The manual runbook further down is the fallback for
+debugging. pi/oh-my-pi support exists but is parked until the Claude path works end to end.
+
+## Automated E2E test
+
+```bash
+scripts/e2e-claude.sh            # on the host; needs sbx, java 21+, curl, jq
+```
+
+Builds and starts the daemon for real, creates a throwaway Claude sandbox (`sbx create --name
+goversbx-e2e-<ts> claude <tmp workspace>`), lets it reach the daemon, then checks every link with
+PASS/FAIL: placeholder -> "please retry" + registration via `sbx ls`/`sbx secret set-custom` ->
+pending request carrying the **real** sandbox name (i.e. proxy substitution works) -> auto-approve
+via the admin API -> `sbx policy allow` applied and visible in `sbx policy ls` -> host reachable.
+Then the same with real Claude Code (`claude -p ... --allowedTools mcp__goversbx-network`) on a
+second host. Removes the sandbox and stops the daemon at the end. Knobs: `TARGET_HOST`,
+`CLAUDE_TARGET_HOST` (default `example.org`/`example.net`, must be blocked beforehand),
+`SKIP_CLAUDE=1`, `KEEP_SANDBOX=1`; logs under `~/.cache/goversbx-e2e/<sandbox>/`.
+
+Already checked from inside a sandbox (no real `sbx` here): the script's mechanics against a stub
+`sbx` that simulates proxy substitution (all steps PASS) and with substitution disabled (fails at
+"no pending request ... placeholder is not being substituted"); the Claude kit install (`claude
+mcp list` -> Connected) and the exact `claude -p` prompt/`--allowedTools` against a local daemon
+(Claude called the tool, request appeared, approved, Claude printed "Approved"). Still assumed from
+sbx docs: the exact `sbx create`/`exec`/`rm --force`/`policy allow --sandbox` syntax - a wrong
+assumption shows up as a FAIL with sbx's own error output. The daemon now logs successful sbx calls
+at INFO (`sbx ls: running sandboxes ...`, `sbx secret set-custom registered ...`, `sbx policy allow
+network ... succeeded`), which the script uses.
 
 ## What exists
 
@@ -49,7 +76,7 @@ Everything that needs a real `sbx` host: `sbx policy allow`, `sbx secret set-cus
 the daemon (all default to dry-run, `GOVERSBX_SBX_DRY_RUN=true`), proxy substitution of our header,
 the network path from a sandbox to the daemon, Claude Code actually calling the tools.
 
-## MVP test runbook (Claude Code)
+## Manual MVP test runbook (Claude Code) - fallback for debugging the automated test
 
 Goal: an agent in a sandbox asks for a blocked host, a human approves in the web UI, the host
 becomes reachable from that sandbox.
