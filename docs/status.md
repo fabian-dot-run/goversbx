@@ -247,6 +247,7 @@ becomes reachable from that sandbox.
 |---------|------------------------------|
 | `claude mcp list` shows the server failed | Sandbox can't reach `host.docker.internal:8787`: policy (step 2), daemon bind address, `curl -v http://host.docker.internal:8787/api/health` from the sandbox. |
 | "please retry" on every call, never a pending request | Placeholder isn't being substituted: `--host` doesn't match the host the sandbox calls (must be `host.docker.internal` here), the request bypasses the sbx proxy, or `secret set-custom` failed (daemon log; `sbx secret ls`). To keep testing the rest of the flow, temporarily register the MCP server with the real sandbox name as header value. |
+| `/mcp` shows goversbx-network "needs authentication" / "Dynamic Client Registration rejected (HTTP 404)" | Claude Code started while the sbx proxy still answered 403 (port not allowed yet) and cached the server as OAuth-protected. Allow the port, then delete the `goversbx-network` entry from `~/.claude/mcp-needs-auth-cache.json` and the `goversbx-network\|...` key under `mcpOAuth` in `~/.claude/.credentials.json`, and restart Claude. With the kit this doesn't happen - the allow-list exists before Claude starts. |
 | Request shows sandbox `unknown-sandbox` | Header missing entirely - check the `--header` in `~/.claude.json`. |
 | Approved but host still blocked | `sbx policy allow` output in the UI (`sbxApplied`/`sbxOutput`); check `sbx policy ls`. |
 
