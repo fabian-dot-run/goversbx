@@ -1,7 +1,7 @@
-package com.goversbx.mcpserver.tools;
+package run.fabian.mcpserver.tools;
 
-import com.goversbx.common.NetworkAccessRequest;
-import com.goversbx.mcpserver.DaemonClient;
+import run.fabian.common.NetworkAccessRequest;
+import run.fabian.mcpserver.DaemonClient;
 import io.modelcontextprotocol.server.McpServerFeatures;
 import io.modelcontextprotocol.spec.McpSchema;
 

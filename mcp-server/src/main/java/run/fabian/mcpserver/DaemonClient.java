@@ -1,7 +1,7 @@
-package com.goversbx.mcpserver;
+package run.fabian.mcpserver;
 
-import com.goversbx.common.JsonSupport;
-import com.goversbx.common.NetworkAccessRequest;
+import run.fabian.common.JsonSupport;
+import run.fabian.common.NetworkAccessRequest;
 
 import java.io.IOException;
 import java.net.URI;

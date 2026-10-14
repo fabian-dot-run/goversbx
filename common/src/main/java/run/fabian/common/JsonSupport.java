@@ -1,4 +1,4 @@
-package com.goversbx.common;
+package run.fabian.common;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;

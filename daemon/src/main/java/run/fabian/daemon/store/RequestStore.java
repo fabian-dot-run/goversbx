@@ -1,7 +1,7 @@
-package com.goversbx.daemon.store;
+package run.fabian.daemon.store;
 
-import com.goversbx.common.NetworkAccessRequest;
-import com.goversbx.common.RequestStatus;
+import run.fabian.common.NetworkAccessRequest;
+import run.fabian.common.RequestStatus;
 
 import java.time.Duration;
 import java.time.Instant;

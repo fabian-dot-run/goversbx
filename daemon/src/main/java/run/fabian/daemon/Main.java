@@ -1,9 +1,9 @@
-package com.goversbx.daemon;
+package run.fabian.daemon;
 
-import com.goversbx.daemon.http.AdminServer;
-import com.goversbx.daemon.http.SandboxApiServer;
-import com.goversbx.daemon.sbx.SbxPolicyClient;
-import com.goversbx.daemon.store.RequestStore;
+import run.fabian.daemon.http.AdminServer;
+import run.fabian.daemon.http.SandboxApiServer;
+import run.fabian.daemon.sbx.SbxPolicyClient;
+import run.fabian.daemon.store.RequestStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

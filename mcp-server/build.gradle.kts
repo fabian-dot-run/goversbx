@@ -12,7 +12,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("com.goversbx.mcpserver.Main")
+    mainClass.set("run.fabian.mcpserver.Main")
 }
 
 tasks.shadowJar {

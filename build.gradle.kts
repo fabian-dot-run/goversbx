@@ -3,7 +3,7 @@ plugins {
 }
 
 allprojects {
-    group = "com.goversbx"
+    group = "run.fabian"
     version = "0.1.0-SNAPSHOT"
 
     repositories {

@@ -1,10 +1,10 @@
-package com.goversbx.daemon.http;
+package run.fabian.daemon.http;
 
-import com.goversbx.common.JsonSupport;
-import com.goversbx.common.NetworkAccessRequest;
-import com.goversbx.common.RequestStatus;
-import com.goversbx.daemon.sbx.SbxPolicyClient;
-import com.goversbx.daemon.store.RequestStore;
+import run.fabian.common.JsonSupport;
+import run.fabian.common.NetworkAccessRequest;
+import run.fabian.common.RequestStatus;
+import run.fabian.daemon.sbx.SbxPolicyClient;
+import run.fabian.daemon.store.RequestStore;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 

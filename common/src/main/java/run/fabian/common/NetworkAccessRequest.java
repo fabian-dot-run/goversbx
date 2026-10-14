@@ -1,4 +1,4 @@
-package com.goversbx.common;
+package run.fabian.common;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;

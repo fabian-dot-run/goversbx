@@ -1,4 +1,4 @@
-package com.goversbx.daemon.sbx;
+package run.fabian.daemon.sbx;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -12,7 +12,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("com.goversbx.daemon.Main")
+    mainClass.set("run.fabian.daemon.Main")
 }
 
 tasks.shadowJar {

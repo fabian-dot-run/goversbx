@@ -1,7 +1,7 @@
-package com.goversbx.mcpserver;
+package run.fabian.mcpserver;
 
-import com.goversbx.mcpserver.tools.CheckNetworkAccessStatusTool;
-import com.goversbx.mcpserver.tools.RequestNetworkAccessTool;
+import run.fabian.mcpserver.tools.CheckNetworkAccessStatusTool;
+import run.fabian.mcpserver.tools.RequestNetworkAccessTool;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapperSupplier;
 import io.modelcontextprotocol.server.McpServer;

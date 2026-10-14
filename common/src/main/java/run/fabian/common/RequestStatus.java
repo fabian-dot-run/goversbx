@@ -1,4 +1,4 @@
-package com.goversbx.common;
+package run.fabian.common;
 
 public enum RequestStatus {
     PENDING,
