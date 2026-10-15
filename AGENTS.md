@@ -217,6 +217,11 @@ registered through.
   the same JVM.
 - The `javalin-testtools` artifact version must track the `javalin` version exactly
   (`gradle/libs.versions.toml`) - they're versioned in lockstep by upstream.
+- **Javalin is held at 6.x on purpose.** Javalin 7 is a major migration (Jetty 12: the
+  `org.eclipse.jetty.servlet` package moved, and the `Context`/routing/SSE/before-filter API changed),
+  which touches the MCP servlet mounting (`Main`), the admin controllers, SSE and the token filter.
+  Don't bump it as a routine dependency update - it needs its own change with the v7 migration guide
+  and a full `binaryTestNative` pass. JUnit (6.x), Jackson (2.x classic) and slf4j track latest.
 
 ## MCP Java SDK notes
 

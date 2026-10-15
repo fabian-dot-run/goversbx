@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "run.fabian"
-    version = "0.1.0-SNAPSHOT"
+    version = "0.2.5"
 
     repositories {
         mavenCentral()

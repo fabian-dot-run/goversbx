@@ -57,7 +57,7 @@ public final class McpContext {
                 .build();
 
         McpSyncServer server = McpServer.sync(servlet)
-                .serverInfo("goversbx-network", "0.2.0")
+                .serverInfo("goversbx-network", "0.2.5")
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .tools(
                         RequestNetworkAccessTool.create(networkAccessApi, sandboxIdentityApi, selfAdminPort),
