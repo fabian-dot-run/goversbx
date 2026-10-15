@@ -259,8 +259,11 @@ Central).
 
 `sandbox-kit/kits/goversbx-<agent>/` are real sbx **v2 mixin kits** (`spec.yaml` + `files/`, spec:
 `docker/sbx-kits-contrib` `spec/SPEC-v2.md`), applied at create time:
-`sbx create --kit sandbox-kit/kits/goversbx-claude --name N claude <ws>` (or `sbx run --kit ...`,
-`sbx kit add` for an existing sandbox; a git URL or the zips from `packageKits` work too). The
+`sbx create --kit sandbox-kit/kits/goversbx-claude --name N claude <ws>` (or `sbx run --kit ...`;
+a git URL or the zips from `packageKits` work too). **`sbx kit add` can't apply a goversbx kit** to an
+existing sandbox - every kit ships `files` (the skill, and the pi/omp register scripts) and the
+kit-add recreate flow doesn't apply a kit's files (`error: kit "…" declares files…`); recreate the
+sandbox (`sbx rm` + `sbx create --kit`) instead. The
 daemon is agent-agnostic - anything that speaks MCP over Streamable HTTP and sends the placeholder
 header works - so adding an agent means adding a kit here, not touching `daemon/`.
 

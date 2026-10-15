@@ -112,8 +112,9 @@ if the daemon isn't running.
 real (`GOVERSBX_SBX_DRY_RUN=false` unless set; log and pid file in `~/.local/state/goversbx/`), waits
 for both health endpoints, and then hands over to `sbx run --kit sandbox-kit/kits/goversbx-<kit>`.
 The daemon keeps running after the session ends - it serves every sandbox - until
-`scripts/goversbx stop`. For a sandbox that already exists it runs `sbx run` without `--kit`
-(add the kit with `sbx kit add`). All other `GOVERSBX_*` variables below pass through.
+`scripts/goversbx stop`. For a sandbox that already exists it runs `sbx run` without `--kit` and
+tells you to recreate it if you want the kit (see below). All other `GOVERSBX_*` variables below pass
+through.
 
 ## Running the daemon
 
@@ -205,8 +206,14 @@ a kit runs inside the sandbox and cannot start it - then create sandboxes with t
 
 ```bash
 sbx create --kit sandbox-kit/kits/goversbx-claude --name my-sandbox claude ~/my-project
-# or: sbx run --kit ..., or add it to an existing sandbox: sbx kit add ...
+# or in one step: sbx run --kit ...
 ```
+
+The kit must be applied at **create** time. `sbx kit add` does *not* work for goversbx kits: they
+ship files (the skill, and the pi/omp register scripts), and `sbx kit add`'s recreate flow doesn't
+apply a kit's files (`error: kit "…" declares files, which the kit-add recreate flow does not yet
+apply`). To put the kit on an existing sandbox, recreate it: `sbx rm <name>` then
+`sbx create --kit … <name> …`.
 
 | Kit | Agent | What it does |
 |-----|-------|--------------|
@@ -235,8 +242,8 @@ and use normal `sbx`**, just by passing the kit path:
 sbx create --kit <kits-dir>/goversbx-claude --name my-sb claude ~/project
 # or start one in a single step:
 sbx run --kit <kits-dir>/goversbx-claude claude ~/project
-# add the kit to an existing sandbox (the launcher deliberately omits --kit here and points you to this):
-sbx kit add <kits-dir>/goversbx-claude --name my-sb
+# existing sandbox: recreate it with the kit (sbx kit add can't apply goversbx kits - they ship files):
+sbx rm my-sb && sbx create --kit <kits-dir>/goversbx-claude --name my-sb claude ~/project
 ```
 
 `<kits-dir>` is:

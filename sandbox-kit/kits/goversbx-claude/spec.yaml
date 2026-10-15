@@ -1,7 +1,7 @@
 schemaVersion: "2"
 kind: mixin
 name: goversbx-claude
-version: "0.2.6"
+version: "0.2.7"
 displayName: goversbx network access (Claude Code)
 description: >-
   Lets Claude Code request outbound network access through the goversbx daemon running on the

@@ -9,8 +9,10 @@
 #                  goversbx run --name my-sb claude ~/my-project
 #                  goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
 #       --kit is only added for a NEW sandbox: if the sandbox named by --name (or by the first
-#       positional argument) already exists, the args go to `sbx run` unchanged - add the kit to an
-#       existing sandbox with `sbx kit add` instead.
+#       positional argument) already exists, the args go to `sbx run` unchanged. To put the goversbx
+#       kit on an existing sandbox you must recreate it (`sbx rm <name>` then create with --kit):
+#       `sbx kit add` does NOT work for goversbx kits, because they ship files and its recreate flow
+#       doesn't apply a kit's files.
 #   goversbx start     start the daemon in the background (no-op if already running)
 #   goversbx stop      stop a daemon started by this script
 #   goversbx status    daemon state, ports, log location
@@ -192,7 +194,8 @@ run_sandbox() {
 
   target="$(target_sandbox "$@")"
   if [ -n "$target" ] && sandbox_exists "$target"; then
-    say "sandbox $target already exists - starting it without --kit (use 'sbx kit add' to add the kit)"
+    say "sandbox $target already exists - starting it as-is, without the goversbx kit."
+    say "To apply the kit, recreate it: sbx rm $target  &&  goversbx run <same args>  ('sbx kit add' can't apply goversbx kits - they ship files)."
     exec "$SBX" run "$@"
   fi
   if [ "$SANDBOX_API_PORT" = 8787 ]; then
