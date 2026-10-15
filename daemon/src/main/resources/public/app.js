@@ -4,8 +4,45 @@ const FALLBACK_POLL_MS = 15000;
 
 let swRegistration = null;
 
+// The admin API is token-gated (threat-model F3). The token arrives in the URL (?token=...), set by
+// `goversbx dashboard`; we keep it in localStorage and strip it from the address bar.
+const TOKEN = resolveToken();
+
+function resolveToken() {
+  let token = '';
+  try {
+    const fromUrl = new URLSearchParams(location.search).get('token');
+    if (fromUrl) {
+      token = fromUrl;
+      localStorage.setItem('goversbx-admin-token', token);
+      history.replaceState(null, '', location.pathname + location.hash);
+    } else {
+      token = localStorage.getItem('goversbx-admin-token') || '';
+    }
+  } catch (e) {
+    // private mode / blocked storage: fall back to whatever was in the URL
+    try { token = new URLSearchParams(location.search).get('token') || ''; } catch (_) { token = ''; }
+  }
+  return token;
+}
+
+function authHeaders(extra) {
+  const headers = Object.assign({}, extra || {});
+  if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
+  return headers;
+}
+
+function showAuthWarning() {
+  const el = document.querySelector('#auth-warning');
+  if (el) el.hidden = false;
+}
+
 async function fetchRequests() {
-  const response = await fetch('/api/requests');
+  const response = await fetch('/api/requests', { headers: authHeaders() });
+  if (response.status === 401) {
+    showAuthWarning();
+    return [];
+  }
   if (!response.ok) {
     return [];
   }
@@ -15,7 +52,7 @@ async function fetchRequests() {
 async function decide(id, action) {
   await fetch(`/api/requests/${id}/${action}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ decidedBy: 'web-ui' }),
   });
   await refresh();
@@ -124,7 +161,7 @@ async function notifyCreated(r) {
     body: r.reason || 'No reason given.',
     tag: r.id,
     requireInteraction: true,
-    data: { id: r.id },
+    data: { id: r.id, token: TOKEN },
   };
   try {
     if (swRegistration) {
@@ -182,7 +219,8 @@ async function registerServiceWorker() {
 
 function connectEvents() {
   const live = document.querySelector('#live-state');
-  const events = new EventSource('/api/events');
+  // EventSource can't set headers, so the token (if any) goes in the query string.
+  const events = new EventSource('/api/events' + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : ''));
   events.addEventListener('ready', () => {
     live.textContent = 'live';
     live.className = 'live live-on';

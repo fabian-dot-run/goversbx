@@ -20,8 +20,10 @@ class AdminEventStreamTest {
     void streamsReadyCreatedAndDecided() {
         try (DaemonProcess daemon = DaemonProcess.start(FakeSbx.create())) {
             List<String> lines = new CopyOnWriteArrayList<>();
+            // EventSource can't set headers, so the daemon also accepts the token as ?token= - use it here.
             var stream = DaemonProcess.HTTP.sendAsync(
-                    HttpRequest.newBuilder(daemon.admin("/api/events")).header("Accept", "text/event-stream").build(),
+                    HttpRequest.newBuilder(daemon.admin("/api/events?token=" + DaemonProcess.ADMIN_TOKEN))
+                            .header("Accept", "text/event-stream").build(),
                     HttpResponse.BodyHandlers.ofLines());
             stream.thenAccept(response -> {
                 assertEquals(200, response.statusCode());

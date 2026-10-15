@@ -1,5 +1,9 @@
 package run.fabian.daemon;
 
+import run.fabian.daemon.admin.AdminTokenFilter;
+import run.fabian.daemon.admin.BrowserOpener;
+import run.fabian.daemon.admin.DaemonConfig;
+import run.fabian.daemon.admin.DashboardAutoOpener;
 import run.fabian.daemon.mcp.McpContext;
 import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestRepository;
 import run.fabian.daemon.networkaccess.adapter.sbx.SbxCliPolicyAdapter;
@@ -53,24 +57,37 @@ public final class Main {
                 sbxCustomSecretPort, sbxSandboxListPort, identityTargetHost, identityEnvVar, identityPlaceholder,
                 identitySandboxPattern);
 
+        DaemonConfig config = DaemonConfig.load();
+
         McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService, adminPort);
 
-        Javalin sandboxApp = Javalin.create(config ->
-                config.jetty.modifyServletContextHandler(handler ->
+        Javalin sandboxApp = Javalin.create(cfg ->
+                cfg.jetty.modifyServletContextHandler(handler ->
                         handler.addServlet(new ServletHolder(mcp.servlet()), "/mcp/*")));
         sandboxApp.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
         sandboxApp.start(sandboxApiBind, sandboxApiPort);
         log.info("Sandbox-facing MCP endpoint listening on {}:{}/mcp", sandboxApiBind, sandboxApiPort);
 
-        Javalin adminApp = Javalin.create(config -> {
-            config.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false));
-            config.staticFiles.add("/public");
+        Javalin adminApp = Javalin.create(cfg -> {
+            cfg.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false));
+            cfg.staticFiles.add("/public");
         });
+        // Token gate first, so it runs before any admin API/SSE handler (static files + /api/health
+        // stay public). The loopback bind is not a boundary against a sandbox - see threat-model F3.
+        AdminTokenFilter.register(adminApp, config.adminToken());
         new AdminApiController(networkAccessService).registerRoutes(adminApp);
-        new AdminEventStream(networkAccessService).registerRoutes(adminApp);
+        AdminEventStream eventStream = new AdminEventStream(networkAccessService);
+        eventStream.registerRoutes(adminApp);
         new SandboxIdentityController(sandboxIdentityService).registerRoutes(adminApp);
         adminApp.start("127.0.0.1", adminPort);
-        log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only)", adminPort);
+        log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only, token-gated)", adminPort);
+
+        if (config.autoOpenDashboard()) {
+            networkAccessService.subscribe(new DashboardAutoOpener(
+                    adminPort, config.adminToken(), new BrowserOpener(config.browserOpenerCommand()),
+                    eventStream::hasConnectedClients, config.autoOpenCooldownMillis()));
+            log.info("Dashboard auto-open is on (disable via autoOpenDashboard=false in the config file)");
+        }
 
         if (dryRun) {
             log.warn("GOVERSBX_SBX_DRY_RUN=true - approvals and sandbox-identity registration will NOT actually call the sbx CLI");

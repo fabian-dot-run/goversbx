@@ -15,7 +15,7 @@ update it when a finding's status changes.
 
 |F1 |T1 |High |Fixed (2026-10-15) |Sandbox-identity header was forgeable by a rogue agent; the daemon could not distinguish a proxy-substituted real name from a self-supplied literal. Fixed: the substituted value is now a per-sandbox secret token, resolved to a name, unknown values rejected 
 |F2 |T1 |Medium |Fixed (2026-10-15) |`host` was passed to `sbx policy allow network <host>` with no validation; wildcards, IP literals, URLs and malformed names were requestable. Fixed: `HostValidation` enforces a single plain hostname (optional port) at `createRequest` and the tool boundary
-|F3 |T1 |Critical |Confirmed; partially mitigated (2026-10-15) |The loopback-bound admin API IS reachable from a sandbox via the proxy once any loopback host is allowed (confirmed on the host: admin health returns 200) - the `127.0.0.1` bind is not a boundary, enabling self-approval. The goversbx-mediated trigger is now closed; the real fix (admin authentication) for the manual-allow trigger is not yet implemented
+|F3 |T1 |Critical |Fixed (2026-10-15) |The loopback-bound admin API was reachable from a sandbox via the proxy once any loopback host was allowed (confirmed on the host: admin health returned 200) - the `127.0.0.1` bind was not a boundary, enabling self-approval. Fixed: the admin API is now token-gated (`AdminTokenFilter`); the token is held by the operator's browser (delivered by `goversbx dashboard`), never visible to a sandbox
 |F4 |T1 |Low (by design) |Accepted |`reason` is attacker-controlled; the human approves on attacker-influenced context 
 |===
 
@@ -217,7 +217,7 @@ Not covered, noted as a deeper issue: a *valid* hostname that resolves to a priv
 to wherever it resolves, so goversbx input validation cannot settle it - it belongs to sbx/proxy
 enforcement. Tracked for a later threat.
 
-=== F3 — The loopback admin API is reachable from a sandbox via the proxy (Critical, confirmed)
+=== F3 — The loopback admin API is reachable from a sandbox via the proxy (Critical, fixed)
 
 *What.* The admin listener binds `127.0.0.1:8788` on the host, and the design treats that binding
 as the sole boundary that stops a sandbox from reaching the approve/deny and registration endpoints
@@ -291,14 +291,25 @@ ports); wildcards are rejected earlier by `HostValidation` (F2). The admin port 
 or "`**`" _through goversbx_. Covered by `RequestNetworkAccessToolTest` and the contract test
 `McpProtocolTest.requestingTheDaemonsOwnAdminPortIsRejected`.
 
-_Not yet fixed - the real fix, now urgent._ The guard does not help if a loopback host is allowed
-*outside* goversbx: a human running `sbx policy allow network localhost:8788` by hand, a pre-existing
-`**` global rule, or any other local process on the host. Because the exposure is now *confirmed* and
-Critical, the bind-only boundary must be replaced by actually *authenticating the admin API* - a
-startup token the operator's browser holds (from the daemon log / a tokenized URL the launcher prints)
-and a sandbox never sees, required on every admin API + SSE call, with the static files staying public.
-This is the next step. It was not bundled into this pass because it changes operator UX (the UI must be
-opened with the token) and churns the admin contract suite, and it deserves its own focused change.
+_Real fix shipped: the admin API is authenticated._ The guard above doesn't help if a loopback host is
+allowed *outside* goversbx (a human running `sbx policy allow network localhost:8788`, a pre-existing
+`**` rule, another local process), so the bind-only boundary is replaced by a token:
+
+* The daemon generates a token at startup (`DaemonConfig`), stores it in
+  `~/.local/state/goversbx/admin-token` (0600; `GOVERSBX_ADMIN_TOKEN` overrides).
+* `AdminTokenFilter` requires it on every `/api/*` call except `/api/health`, via
+  `Authorization: Bearer <token>` or `?token=<token>` (an `EventSource` can't set headers). Static
+  files stay public (no secret in them); `/api/health` stays public so the launcher can poll it.
+* The token reaches the operator's browser without being typed: `goversbx dashboard` reads the token
+  file and opens `…/?token=…`; the page stores it in `localStorage`, strips it from the URL, and sends
+  it on every fetch/SSE call and in each notification's data (so the service worker's Approve/Deny also
+  carry it). A sandbox never has the token - it isn't in the served files and the state dir isn't
+  mounted into a sandbox - so reaching the port is no longer sufficient. Opening the UI by hand without
+  a token shows a "not authenticated" notice.
+
+Verified by `AdminAuthTest` (401 without the token, 200 with it via header or query, health/static
+public) and `AdminTokenFilterTest`. This also hardens against other local users/processes, not just
+sandboxes.
 
 === F4 — The approval context is attacker-influenced (Low, by design)
 

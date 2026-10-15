@@ -6,22 +6,25 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 
 self.addEventListener('notificationclick', event => {
-  const id = event.notification.data && event.notification.data.id;
+  const data = event.notification.data || {};
+  const id = data.id;
   event.notification.close();
   if (!id) return;
 
   if (event.action === 'approve' || event.action === 'deny') {
-    event.waitUntil(decide(id, event.action));
+    event.waitUntil(decide(id, event.action, data.token));
   } else {
     event.waitUntil(showRequest(id));
   }
 });
 
-async function decide(id, action) {
+async function decide(id, action, token) {
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
     const response = await fetch(`/api/requests/${id}/${action}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ decidedBy: 'notification' }),
     });
     // 409: someone decided it first - nothing to report.

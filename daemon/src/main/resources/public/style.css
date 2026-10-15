@@ -109,3 +109,12 @@ button:hover {
 tr.highlight td {
   background: #fff7d6;
 }
+
+.auth-warning {
+  background: #fde8e8;
+  border: 1px solid #f5b5b5;
+  color: #8a1f1f;
+  padding: 0.6rem 0.8rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}

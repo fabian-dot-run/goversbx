@@ -115,12 +115,23 @@ those ports (`adapter.persistence`, `adapter.sbx`) and hosts the driving HTTP ad
   (`GOVERSBX_ADMIN_PORT`, default 8788). This is a security boundary, not an accident: there's no
   authn in this MVP, and a sandbox must never be able to reach the approve/deny endpoints. If you
   add a new endpoint, think about which of the two it belongs on before adding it, and don't merge
-  them into one listener to "simplify" it. The `127.0.0.1` bind is necessary but may not be
-  sufficient on its own (the proxy can re-originate sandbox traffic as host loopback - threat-model
-  F3, `scripts/diagnose-admin-reachability.sh`), so `RequestNetworkAccessTool` additionally refuses a
-  network-access request that targets the daemon's own admin port (or a `*` wildcard):
-  `McpContext.build` is passed `selfAdminPort` for exactly this. Don't drop that argument or the
-  `targetRejectionReason` guard.
+  them into one listener to "simplify" it. The `127.0.0.1` bind is necessary but **not** sufficient on
+  its own: the proxy re-originates sandbox traffic as host loopback, so a sandbox CAN reach the admin
+  port once any loopback host is allowed (threat-model F3, confirmed via
+  `scripts/diagnose-admin-reachability.sh`). So the admin API is **token-gated**
+  (`admin.AdminTokenFilter`, wired first in `Main`): every `/api/*` call except `/api/health` needs
+  the token (`Authorization: Bearer` or `?token=`); static files and health stay public. The token
+  lives in `admin.DaemonConfig` (file `~/.local/state/goversbx/admin-token`, or `GOVERSBX_ADMIN_TOKEN`),
+  reaches the browser via `goversbx dashboard`, and a sandbox never has it. A new admin endpoint must
+  stay under `/api/*` so it's covered; don't add public admin endpoints. `RequestNetworkAccessTool`
+  additionally refuses a request that targets the daemon's own admin port or a `*` wildcard
+  (`McpContext.build` is passed `selfAdminPort`) - keep that too.
+- The `admin` package holds daemon-wide infrastructure wired by `Main` (not a bounded context):
+  `DaemonConfig` (admin token + the user-editable `~/.config/goversbx/config.properties`, env overrides
+  via `GOVERSBX_*`), `AdminTokenFilter`, `BrowserOpener`, and `DashboardAutoOpener`. The auto-opener
+  opens the dashboard on a request only when no dashboard is connected - "connected" = the admin event
+  stream has a live SSE client (`AdminEventStream.hasConnectedClients`), which is how it avoids
+  reopening or stealing focus from an open tab. Default on; `autoOpenDashboard=false` disables it.
 - `SbxCliPolicyAdapter` and `SbxCliCustomSecretAdapter` both default to `GOVERSBX_SBX_DRY_RUN=true`
   (log the command they'd run instead of executing it). Don't flip this default - real sandboxes
   get their network policy and identity secret changed by these calls.

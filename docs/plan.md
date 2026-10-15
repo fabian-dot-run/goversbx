@@ -689,3 +689,35 @@ F3 itself is now CONFIRMED on the host (`scripts/diagnose-admin-reachability.sh`
 returns 200 - the loopback bind is not a boundary, the proxy re-originates to host loopback. Severity
 Critical. The real fix (authenticate the admin API with a startup token the sandbox never sees) is the
 next step and is not in this pass. `./gradlew check` + `:daemon:binaryTestJar` pass.
+
+## Revision (2026-10-15): admin API authentication (F3 fix) + dashboard auto-open
+
+Closes threat-model F3, confirmed Critical on the host (`scripts/diagnose-admin-reachability.sh`: the
+loopback-bound admin API answers requests originating inside a sandbox once any loopback host is
+allowed - the `127.0.0.1` bind is not a boundary).
+
+- **Admin token** (`admin.DaemonConfig` + `admin.AdminTokenFilter`): the daemon generates a token at
+  startup, stores it in `~/.local/state/goversbx/admin-token` (0600; `GOVERSBX_ADMIN_TOKEN` overrides).
+  Every `/api/*` call except `/api/health` requires it via `Authorization: Bearer` or `?token=` (the
+  EventSource uses the query form). Static files and health stay public. The UI takes the token from
+  `?token=` (set by `goversbx dashboard`), stores it in localStorage, strips it from the URL, and
+  sends it on fetch/SSE and in each notification's data so the service worker's Approve/Deny carry it.
+  A sandbox never has the token (not in the served files; the state dir isn't mounted in), so reaching
+  the port is no longer enough.
+
+- **Auto-open the dashboard** (`admin.DashboardAutoOpener` + `BrowserOpener`, config
+  `autoOpenDashboard`, default on): when a request arrives and no dashboard is connected, open it in
+  the default browser (authenticated URL). "Connected" is the daemon's own live SSE-client count
+  (`AdminEventStream.hasConnectedClients`), so an already-open dashboard is never reopened and never
+  has its focus stolen - no browser-window detection needed, and it doesn't fight the notifications.
+  A cooldown absorbs a burst while the new tab connects. Config file
+  `~/.config/goversbx/config.properties` is created with commented defaults on first start.
+
+- **Launcher**: `goversbx dashboard` reads the token file and opens `…/?token=…`; `start` now exports
+  `GOVERSBX_STATE_DIR` so the daemon's token file and the launcher agree.
+
+Tests: `AdminTokenFilterTest`, `AdminAuthTest` (401/200, header+query, health/static public),
+`DashboardAutoOpenTest` (opens when none connected, doesn't when an SSE client is present). The
+black-box suite sets a fixed `GOVERSBX_ADMIN_TOKEN` and carries it on admin calls; auto-open is off by
+default in tests and driven via a recording opener where tested. `./gradlew check` +
+`:daemon:binaryTestJar` pass.

@@ -118,6 +118,7 @@ start_daemon() {
   fi
   GOVERSBX_SBX_DRY_RUN="${GOVERSBX_SBX_DRY_RUN:-false}" \
   GOVERSBX_SBX_BINARY="${GOVERSBX_SBX_BINARY:-$SBX}" \
+  GOVERSBX_STATE_DIR="$STATE_DIR" \
     nohup "$@" >>"$LOG_FILE" 2>&1 </dev/null &
   pid=$!
   echo "$pid" >"$PID_FILE"
@@ -145,15 +146,20 @@ stop_daemon() {
   fi
 }
 
-open_dashboard() { # open the admin UI in the default browser, at the configured admin port
+open_dashboard() { # open the admin UI in the default browser, authenticated, at the configured port
   if ! healthy; then
     die "daemon not running on $ADMIN - start it with 'goversbx start' (or 'goversbx run ...')"
   fi
-  local opener="" o
+  local opener="" o token="" url="$ADMIN/"
   for o in open xdg-open; do command -v "$o" >/dev/null 2>&1 && { opener="$o"; break; }; done
   [ -n "$opener" ] || die "no browser opener found (open/xdg-open) - open $ADMIN yourself"
-  say "opening $ADMIN"
-  "$opener" "$ADMIN" >/dev/null 2>&1 &
+  # The admin API is token-gated; pass the token so the page can call it. The daemon writes the token
+  # to $STATE_DIR/admin-token (GOVERSBX_ADMIN_TOKEN overrides, e.g. in a managed service).
+  if [ -n "${GOVERSBX_ADMIN_TOKEN:-}" ]; then token="$GOVERSBX_ADMIN_TOKEN"
+  elif [ -f "$STATE_DIR/admin-token" ]; then token="$(cat "$STATE_DIR/admin-token" 2>/dev/null)"; fi
+  [ -n "$token" ] && url="$ADMIN/?token=$token"
+  say "opening the dashboard"
+  "$opener" "$url" >/dev/null 2>&1 &
 }
 
 sandbox_exists() { # $1 = name

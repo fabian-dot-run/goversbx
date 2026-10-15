@@ -30,6 +30,8 @@ final class DaemonProcess implements AutoCloseable {
     static final ObjectMapper JSON = new ObjectMapper();
     static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     static final String PLACEHOLDER = "goversbx-sandbox-identity-placeholder-v1";
+    /** Fixed admin token for tests (the daemon takes it from GOVERSBX_ADMIN_TOKEN); admin calls carry it. */
+    static final String ADMIN_TOKEN = "test-admin-token";
 
     final FakeSbx sbx;
     final int sandboxPort;
@@ -70,6 +72,9 @@ final class DaemonProcess implements AutoCloseable {
             env.put("GOVERSBX_SANDBOX_API_BIND", "127.0.0.1");
             env.put("GOVERSBX_SBX_BINARY", sbx.binary().toString());
             env.put("GOVERSBX_SBX_DRY_RUN", "false");
+            env.put("GOVERSBX_ADMIN_TOKEN", ADMIN_TOKEN);
+            env.put("GOVERSBX_AUTO_OPEN_DASHBOARD", "false");            // tests opt in explicitly
+            env.put("XDG_CONFIG_HOME", Files.createTempDirectory("goversbx-config").toString());
             env.putAll(envOverrides);
             long started = System.nanoTime();
             Process process = builder.start();
@@ -162,12 +167,14 @@ final class DaemonProcess implements AutoCloseable {
     }
 
     HttpResponse<String> get(URI uri) {
-        return send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).build());
+        return send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer " + ADMIN_TOKEN).build());
     }
 
     HttpResponse<String> postJson(URI uri, String body) {
         return send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + ADMIN_TOKEN)
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build());
     }
 

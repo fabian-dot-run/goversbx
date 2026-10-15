@@ -10,6 +10,11 @@
   <p class="subtitle">Pending and decided network-access requests from sandboxes
     <span id="live-state" class="live live-off">connecting...</span></p>
 
+  <p id="auth-warning" class="auth-warning" hidden>
+    Not authenticated. Open the dashboard with <code>goversbx dashboard</code> so it carries the admin
+    token (the admin API is token-gated).
+  </p>
+
   <p class="notify">
     <span id="notify-state"></span>
     <button id="notify-button" type="button" hidden>Enable notifications</button>

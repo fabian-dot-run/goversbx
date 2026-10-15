@@ -129,15 +129,38 @@ Two HTTP listeners start:
   what sandboxes reach via the always-allow-listed hostname - there is nothing else to install
   inside a sandbox.
 - **Admin UI + API** — `127.0.0.1:8788` only (`GOVERSBX_ADMIN_PORT`), never exposed to a
-  sandbox. Open it in a browser to approve/deny pending requests. It updates live (server-sent
-  events, `GET /api/events`), and after "Enable notifications" it raises a browser notification
-  for every new request with Approve/Deny buttons (via a service worker; buttons need Firefox 152+
-  or Chrome - otherwise clicking the notification opens the request). Keep a tab open; on macOS the
-  browser itself must be allowed to send notifications (System Settings > Notifications).
+  sandbox. Open it with `goversbx dashboard` (it carries the admin token, see below) to approve/deny
+  pending requests. It updates live (server-sent events, `GET /api/events`), and after "Enable
+  notifications" it raises a browser notification for every new request with Approve/Deny buttons
+  (via a service worker; buttons need Firefox 152+ or Chrome - otherwise clicking the notification
+  opens the request). Keep a tab open; on macOS the browser itself must be allowed to send
+  notifications (System Settings > Notifications).
+
+The admin API is **token-gated**: the loopback bind alone is not a boundary, because the sbx proxy
+can re-originate a sandbox's traffic to the host's loopback (see `docs/threat-model.adoc`, F3). The
+daemon generates a token at startup, stores it in `~/.local/state/goversbx/admin-token`
+(`GOVERSBX_ADMIN_TOKEN` overrides it), and requires it on every admin API/SSE call via
+`Authorization: Bearer …` or `?token=…`. Static files and `/api/health` stay public. `goversbx
+dashboard` reads the token and opens an authenticated URL, so you normally never see it; opening
+`127.0.0.1:8788` by hand shows a "not authenticated" notice.
 
 By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals and sandbox-identity registration log what
 they *would* run without calling `sbx`. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't
 on `PATH`) to apply real changes.
+
+### Configuration file
+
+On first start the daemon writes a commented config file to `~/.config/goversbx/config.properties`
+(`$XDG_CONFIG_HOME` is honored); edit it and restart the daemon to apply. Environment variables
+(`GOVERSBX_*`) override the file.
+
+- `autoOpenDashboard` (default `true`) — when a request arrives and **no dashboard is currently
+  connected**, the daemon opens the dashboard in your default browser (authenticated). It never opens
+  a second window or steals focus while a dashboard is already open: the daemon knows a dashboard is
+  open because it holds a live SSE connection. Set it to `false` to rely only on a tab you keep open
+  and its notifications. Env override: `GOVERSBX_AUTO_OPEN_DASHBOARD`.
+- `autoOpenCooldownMillis` (default `10000`) — how long after an auto-open before it may open again,
+  to absorb a burst of requests while the new tab is still connecting.
 
 ### Sandbox identity
 

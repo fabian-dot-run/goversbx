@@ -14,6 +14,8 @@ import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 public final class AdminEventStream {
 
     private final NetworkAccessService service;
+    private final java.util.concurrent.atomic.AtomicInteger connectedClients =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     public AdminEventStream(NetworkAccessService service) {
         this.service = service;
@@ -23,10 +25,22 @@ public final class AdminEventStream {
         app.sse("/api/events", client -> {
             client.keepAlive();
             Runnable unsubscribe = service.subscribe(new Forwarder(client));
-            client.onClose(unsubscribe);
+            connectedClients.incrementAndGet();
+            client.onClose(() -> {
+                unsubscribe.run();
+                connectedClients.decrementAndGet();
+            });
             // Confirms the subscription, so a client knows it won't miss events from here on.
             send(client, "ready", "{}");
         });
+    }
+
+    /**
+     * Whether at least one dashboard is currently connected to the event stream - i.e. a dashboard
+     * tab is open and listening. Used by {@code DashboardAutoOpener} to decide whether to open one.
+     */
+    public boolean hasConnectedClients() {
+        return connectedClients.get() > 0;
     }
 
     private record Forwarder(SseClient client) implements NetworkAccessListener {
