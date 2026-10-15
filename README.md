@@ -60,9 +60,10 @@ brew services start goversbx        # daemon at login (launchd); or `goversbx st
 goversbx run claude ~/my-project    # start a sandbox with the kit
 ```
 
-Admin UI: http://127.0.0.1:8788. The installed `goversbx` is the same launcher as
-`scripts/goversbx` below; it runs the native `goversbx-daemon` and uses the kits shipped with the
-formula. The release tarball (`goversbx-<version>-darwin-arm64.tar.gz`) works unpacked as is.
+Admin UI: http://127.0.0.1:8788 (or `goversbx dashboard` to open it in your browser). The installed
+`goversbx` is the same launcher as `scripts/goversbx` below; it runs the native `goversbx-daemon` and
+uses the kits shipped with the formula. The release tarball (`goversbx-<version>-darwin-arm64.tar.gz`)
+works unpacked as is.
 
 ### Releasing
 
@@ -99,8 +100,13 @@ needs a test here.
 scripts/goversbx run claude ~/my-project        # = start daemon if needed, then sbx run --kit ... claude ~/my-project
 scripts/goversbx run --name my-sb claude ~/my-project
 scripts/goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
+scripts/goversbx dashboard                       # open the admin UI in your default browser
 scripts/goversbx status | logs | stop
 ```
+
+`goversbx dashboard` opens the admin UI at the configured admin port (handy when
+`GOVERSBX_ADMIN_PORT` isn't the default `8788`, so you don't have to remember the URL); it refuses
+if the daemon isn't running.
 
 `scripts/goversbx` builds the jar if it's missing or stale, starts the daemon in the background for
 real (`GOVERSBX_SBX_DRY_RUN=false` unless set; log and pid file in `~/.local/state/goversbx/`), waits
@@ -194,6 +200,42 @@ The skill's source of truth is `sandbox-kit/skill/`; each kit carries a copy bec
 self-contained. After editing the skill run `./gradlew :sandbox-kit:syncKitSkills` (`check` fails
 on drift). `./gradlew :sandbox-kit:packageKits` writes one zip per kit to
 `sandbox-kit/build/distributions/`.
+
+### Using plain `sbx` without the `goversbx` launcher
+
+The `goversbx` CLI is only convenience: at its core it does two things — start the daemon if needed,
+then call `sbx run --kit …`. **Once the daemon is already running, you can skip the launcher entirely
+and use normal `sbx`**, just by passing the kit path:
+
+```bash
+# new sandbox:
+sbx create --kit <kits-dir>/goversbx-claude --name my-sb claude ~/project
+# or start one in a single step:
+sbx run --kit <kits-dir>/goversbx-claude claude ~/project
+# add the kit to an existing sandbox (the launcher deliberately omits --kit here and points you to this):
+sbx kit add <kits-dir>/goversbx-claude --name my-sb
+```
+
+`<kits-dir>` is:
+
+- **repo checkout:** `sandbox-kit/kits/goversbx-<agent>` (`goversbx-claude`, `goversbx-pi`,
+  `goversbx-omp`, `goversbx-opencode`).
+- **Homebrew / tarball install:** `share/goversbx/kits/` under the install prefix (what the launcher
+  resolves as `GOVERSBX_KITS_DIR`, i.e. `../share/goversbx/kits` next to the `goversbx` binary; for
+  Homebrew, `"$(brew --prefix)"/share/goversbx/kits`). The kits are self-contained, so the path works
+  as-is.
+
+Two things the launcher otherwise handles for you:
+
+- **The daemon must be running** — a kit can't start it (kit hooks run inside the sandbox; the daemon
+  needs the host's `sbx` CLI and stays outside the sandbox). Start it once with `goversbx start` (or
+  `brew services start goversbx`).
+- **Non-default port** — if your daemon isn't on the default `8787`, append
+  `--kit-arg goversbx-<agent>.daemonPort=<port>` (the launcher sets this automatically). On `8787`
+  nothing extra is needed.
+
+Everything else — the network rule to reach the daemon and the MCP registration — the kit brings
+itself.
 
 ## Status
 
