@@ -1,0 +1,334 @@
+= goversbx — Threat Model &amp; Security Review
+
+Living document. Started 2026-10-15. Companion to `docs/plan.md` (design + history) and
+`docs/status.md` (implementation state). This file tracks security properties the system is meant
+to hold, the threats against them, and the findings from reviewing the code against those threats.
+
+Each threat is worked through as its own section. Findings are numbered `F<n>`, carry a severity,
+cite the code they were found in, and state a fix. The findings table at the top is the index;
+update it when a finding's status changes.
+
+== Findings index
+
+|===
+|ID |Threat |Severity |Status |Summary 
+
+|F1 |T1 |High |Fixed (2026-10-15) |Sandbox-identity header was forgeable by a rogue agent; the daemon could not distinguish a proxy-substituted real name from a self-supplied literal. Fixed: the substituted value is now a per-sandbox secret token, resolved to a name, unknown values rejected 
+|F2 |T1 |Medium |Fixed (2026-10-15) |`host` was passed to `sbx policy allow network <host>` with no validation; wildcards, IP literals, URLs and malformed names were requestable. Fixed: `HostValidation` enforces a single plain hostname (optional port) at `createRequest` and the tool boundary
+|F3 |T1 |Critical |Confirmed; partially mitigated (2026-10-15) |The loopback-bound admin API IS reachable from a sandbox via the proxy once any loopback host is allowed (confirmed on the host: admin health returns 200) - the `127.0.0.1` bind is not a boundary, enabling self-approval. The goversbx-mediated trigger is now closed; the real fix (admin authentication) for the manual-allow trigger is not yet implemented
+|F4 |T1 |Low (by design) |Accepted |`reason` is attacker-controlled; the human approves on attacker-influenced context 
+|===
+
+Severity scale: *Critical* (unauthorized host access with no human and no precondition),
+*High* (defeats a stated trust boundary, or needs only a plausible human mistake), *Medium*
+(meaningful escalation that still requires a human approval), *Low* (residual risk inherent to
+the human-in-the-loop design).
+
+== System under review
+
+goversbx lets an agent inside an `sbx`-managed Docker sandbox request outbound network access to a
+host. A host-side daemon (outside every sandbox) receives the request over MCP, shows it to a human
+in a loopback-bound admin UI, and on approval runs `sbx policy allow network <host> --sandbox
+<name>`. One daemon process serves every sandbox.
+
+Relevant components (all in `daemon/`):
+
+* *Sandbox-facing listener* — `0.0.0.0:8787`, hosts only the MCP endpoint `/mcp` and
+ `/api/health` (`Main.java`). Reachable from every sandbox via the sbx proxy, no authentication.
+* *Admin listener* — `127.0.0.1:8788` only, hosts the approve/deny API, the static UI, the SSE
+ event stream, and the sandbox-identity registration endpoint (`Main.java`,
+ `AdminApiController`, `SandboxIdentityController`, `AdminEventStream`). Intended to be
+ unreachable from any sandbox.
+* *Sandbox identity* — the MCP request carries `X-Goversbx-Sandbox-Name`. The kit bakes in a
+ fixed placeholder literal (`goversbx-sandbox-identity-placeholder-v1`); the sbx proxy rewrites
+ that literal to the sandbox's real name on the way out, via a per-sandbox
+ `sbx secret set-custom` the daemon registers reactively (`SandboxIdentityService`,
+ `SbxCliCustomSecretAdapter`).
+
+=== Trust boundaries
+
+. *Sandbox ↔ host daemon (sandbox port).* Crosses the sbx proxy. Everything on the sandbox side
+ is under the agent's control: its filesystem, its MCP client config (`~/.claude.json`), and the
+ ability to open raw HTTP connections to `host.docker.internal:8787`. The only thing the sandbox
+ side does _not_ control is what the proxy does to a request in flight.
+. *Sandbox ↔ admin API.* Must not be crossable. Enforced today only by binding the admin
+ listener to `127.0.0.1` and by network policy (see F3).
+. *Daemon ↔ sbx CLI.* The daemon shells out to `sbx`. Trusted; the daemon is the policy
+ authority a sandbox must not be able to drive directly.
+
+=== Attacker model
+
+A *rogue agent*: code running inside one sandbox with the goversbx kit, with full control of that
+sandbox's user account, filesystem and outbound sockets (subject to the proxy). It may be a
+compromised legitimate agent, a prompt-injected one, or a deliberately malicious workload. It is
+_not_ assumed to have a foothold on the host, root in the container escape sense, or the ability to
+run `sbx` itself. A human operator watches the admin UI and approves or denies requests; the human
+is honest but can be misled by what the UI shows them.
+
+'''
+
+== T1 — A rogue agent reaches hosts it should not
+
+*Security property.* A sandbox gains outbound access to a host only when a human, looking at a
+truthful description of _which sandbox_ wants _which host_ and _why_, approves that specific
+request; and the access that results is exactly the host shown, scoped to exactly the sandbox that
+asked.
+
+The human approval is the gate. A rogue agent therefore reaches a forbidden host only by (a)
+misleading the human into approving, (b) causing a grant that differs from what the human approved,
+or (c) bypassing the human entirely. F1–F4 are the paths found for each.
+
+=== F1 — The sandbox-identity header is forgeable (High, confirmed)
+
+*What.* The daemon derives the requesting sandbox's identity solely from the
+`X-Goversbx-Sandbox-Name` HTTP header (`McpContext.build`'s `contextExtractor`, read in
+`RequestNetworkAccessTool` via `exchange.transportContext()`). The proxy's protection is a *string
+substitution of one specific literal*: it rewrites `goversbx-sandbox-identity-placeholder-v1` to
+the real sandbox name. Any header value that is _not_ that literal is forwarded unchanged — the
+proxy does not strip, reject or otherwise police the header.
+
+A rogue agent is not confined to the MCP client the kit configured. It can open a raw connection to
+`http://host.docker.internal:8787/mcp` (reachable, unauthenticated) and send whatever header it
+likes. If it sends a value other than the placeholder, that value reaches the daemon verbatim, and
+`SandboxIdentityService.isUnsubstitutedPlaceholder(...)` returns false, so the daemon treats it as
+an already-verified identity and creates a `NetworkAccessRequest` attributed to it.
+
+*Root cause.* The registered `--value` is the sandbox's own name, chosen deliberately on the
+argument that "the property needed is unforgeability, not secrecy" (`plan.md`, the `set-custom`
+revision). That argument does not hold: because the value equals the name, the post-substitution
+header the daemon sees for an honest sandbox (`"claude-goversbx"`) is byte-identical to the header a
+forger supplies by hand (`"claude-goversbx"`). The daemon has no way to tell the two apart. Sandbox
+names are not secret — they appear in `sbx ls`, in the admin UI, and are often predictable — so a
+forger does not even need to guess.
+
+*Evidence (live).* Against the running daemon, two MCP `request_network_access` calls were made
+to the sandbox port, differing only in the identity header:
+
+* header = the real placeholder → request created (proxy-substituted to this sandbox's real name);
+* header = `TOTALLY-FORGED-sandbox-that-does-not-exist-xyz` (a name no sandbox has) → the daemon
+ *still created a pending request*, attributed to that non-existent name, rather than answering
+ "identity not registered, please retry".
+
+The second result is the proof: the daemon accepted a fabricated identity for a sandbox that does
+not exist. A forger would normally supply a _real_ victim name instead.
+
+*Impact.*
+- *Confused deputy / misdirected grant.* The agent sends a different, real sandbox's name. On
+ approval the daemon runs `sbx policy allow network <host> --sandbox <victim>` — the grant lands on
+ the victim sandbox, not the attacker's. This is an integrity break on another tenant's policy and
+ a way to get a host opened for a sandbox whose own agent never asked.
+- *Attribution / audit spoofing.* The admin UI's "Sandbox" column, the approver's main piece of
+ context, is attacker-chosen. The agent can present a trusted-looking or innocuous name to make a
+ request more likely to be approved, and the decided-request log records the forged name.
+
+*Fix.* Make the substituted value a *per-sandbox secret token*, not the name:
+
+. The daemon mints a random token per sandbox and registers it as the `set-custom` value
+ (`SbxCliCustomSecretAdapter`), keeping its own token→name map.
+. The tool handler resolves the incoming header through that map. A value that is not a known
+ minted token is rejected — including the bare placeholder, which maps to "register this sandbox,
+ then retry" exactly as today.
+
+With a secret value, the proxy substitutes an honest sandbox's placeholder to _that sandbox's_ token
+and nothing else; a forger who sends a guessed name, another sandbox's name, or the placeholder can
+never produce a victim's token, so every request resolves to the caller's own sandbox or is
+rejected. This restores the property F1 breaks. It is the "stronger fix" `plan.md` sketched and then
+set aside on the mistaken secrecy argument above.
+
+*Interim mitigation.* None that closes it. Narrowing `GOVERSBX_IDENTITY_SANDBOX_PATTERN` and
+reading the admin UI carefully reduce blast radius but do not stop forgery.
+
+*Status: fixed (2026-10-15).* Implemented exactly the token approach above:
+
+* `SandboxIdentityService` now mints a random 256-bit token (`gvsbx-<base64url>`) per sandbox,
+ registers it as the `sbx secret set-custom --value`, and keeps a private token→name map. The API
+ changed from `isUnsubstitutedPlaceholder(headerValue)` to
+ `resolveSandboxName(identityHeaderValue): Optional<String>`.
+* `RequestNetworkAccessTool` resolves the header through that map. A value that does not resolve -
+ the raw placeholder, a stale token, or any forged value - triggers registration and a retry and
+ creates no request. It never treats the header as a name.
+* A sandbox only ever holds the placeholder; the proxy substitutes it to that sandbox's own token.
+ A forger who sends a guessed name, another sandbox's name, or the placeholder can only ever
+ resolve to its own sandbox or be rejected - it cannot produce a victim's secret token.
+
+*No persistence needed across a daemon restart.* The token lives in sbx (survives the daemon) and
+in the daemon's in-memory map (does not). After a restart the map is empty, so a registered
+sandbox's placeholder is substituted to a token the daemon no longer knows → `resolveSandboxName`
+returns empty → one re-registration mints a fresh token, overwrites the stale sbx secret live, and
+the next retry resolves. This is the same single "please retry" round trip a brand-new sandbox
+already does, so it fits the deliberate in-memory-only design; a disk-backed token map would only
+save that one retry and can be added later if wanted. The open residue is a slow unbounded growth of
+the token map (old tokens are never evicted, each still maps only to its own sandbox) and that an
+unresolvable value makes the daemon run `sbx ls` once - both tracked under T2 (denial of service),
+not T1.
+
+*Tests.* `SandboxIdentityServiceTest` asserts the value is a token, not the name, and that only a
+minted token resolves (a bare name or the placeholder does not). The black-box contract suite
+(`daemon/src/binaryTest`) drives the real flow by learning each sandbox's token the way the proxy
+would (`DaemonProcess.asSandbox`/`tokenFor`), and `missingSandboxHeaderIsTreatedAsUnregistered`
+pins that a call with no resolvable identity creates no request. `./gradlew check` and
+`:daemon:binaryTestJar` pass. Not yet re-run end to end against a real sbx host, and the host's
+currently-running daemon still has the old build until it is restarted.
+
+=== F2 — `host` is unvalidated; wildcards and broad patterns are requestable (Medium)
+
+*What.* The `host` argument flows from the tool call straight through to the sbx CLI with no
+validation beyond a non-blank check. `RequestNetworkAccessTool.handle` only rejects blank `host`;
+`NetworkAccessRequest` stores it as-is; `SbxCliPolicyAdapter.allowNetwork` places it verbatim as a
+positional argument in `sbx policy allow network <host> --sandbox <name>`.
+
+Because `host` is never constrained to a single plain hostname, an agent can request values sbx
+interprets more broadly than the UI's "Host" column suggests: the catch-all `**`, prefix wildcards
+like `*.example.com`, bare IPs, or `host:port` forms. A single approval of `**` grants the sandbox
+unrestricted outbound access.
+
+*Not a shell-injection issue.* Both sbx adapters build an argument _list_ for `ProcessBuilder`
+(`SbxCliPolicyAdapter`, `SbxCliCustomSecretAdapter`), so `host` is always one argv element — shell
+metacharacters and embedded `--flags` are inert, and flag-injection into the `sbx` command line is
+not possible. The concern is purely the _semantics_ of the single host token sbx receives.
+
+*Impact.* Escalation from "one host" to "a wide range" or "everything", gated only by the human
+noticing an unusual value in the UI. Combined with a benign `reason` (F4) and a trusted-looking
+sandbox name (F1), `**` or a broad wildcard can pass a hurried approval. The resulting rule is
+permanent for the sandbox (no expiry in this MVP).
+
+*Fix.* Validate `host` at the tool boundary against a strict single-hostname pattern (letters,
+digits, hyphens, dots; a label-structured regex), rejecting `*`, `**`, `/`, `:`, whitespace and
+bare IPs. If wildcard requests are ever wanted, make them an explicit, separately styled case in
+the UI (distinct color, a second confirmation) rather than an ordinary host string the approver
+skims past. Validation belongs in `networkaccess` (reject at `createRequest`), not only in the UI,
+so the raw MCP path is covered too.
+
+*Status (2026-10-15): fixed.* `run.fabian.daemon.networkaccess.domain.HostValidation` is now the
+single authority for what a requestable host is. It accepts a well-formed DNS hostname with an
+optional numeric port and rejects everything else: wildcards (`**`, `*.x`), URLs/schemes/paths,
+whitespace, malformed labels, bad ports, and *all* IP literals (v4 and v6) - an IP hides from the
+approver what is being allowed and is the usual route to cloud metadata (169.254.169.254) or internal
+ranges. It is enforced in two places, per the "reject at `createRequest`" note above:
+`NetworkAccessService.createRequest` throws `InvalidHostException` as a domain invariant (so no caller
+can ever store an invalid host), and the MCP tool calls it through the published
+`NetworkAccessApi.hostRejectionReason` for a clean agent-facing message (the `mcp` context must not
+import `networkaccess.domain` directly). `RequestNetworkAccessTool.targetRejectionReason` keeps only
+the F3 admin-port check. Covered by `HostValidationTest`, `NetworkAccessServiceTest` and the contract
+suite.
+
+Not covered, noted as a deeper issue: a *valid* hostname that resolves to a private/loopback IP
+(DNS rebinding, an internal name). The policy is keyed on the hostname string and the proxy connects
+to wherever it resolves, so goversbx input validation cannot settle it - it belongs to sbx/proxy
+enforcement. Tracked for a later threat.
+
+=== F3 — The loopback admin API is reachable from a sandbox via the proxy (Critical, confirmed)
+
+*What.* The admin listener binds `127.0.0.1:8788` on the host, and the design treats that binding
+as the sole boundary that stops a sandbox from reaching the approve/deny and registration endpoints
+(`AdminApiController`'s class comment, `Main.java`). But the sbx proxy terminates a sandbox's
+connection to `host.docker.internal` and *re-originates it from the host, matched as `localhost`*
+— this is exactly why identity substitution requires `--host localhost` and why the kit's network
+rule is `localhost:<port>` (`plan.md`, the "substitution needs `--host localhost`" revision;
+`diagnose-substitution.sh`). A connection the proxy re-originates as `localhost:8788` on the host
+would reach the host's own loopback — i.e. the admin server.
+
+The admin port is not in any kit's `permissions.network.allow`, so it is blocked by default (a
+sandbox probe to `host.docker.internal:8788` returns a policy `403`). The exposure is *conditional
+on a loopback host becoming allowed*: if a rogue agent ever gets `localhost:8788`,
+`host.docker.internal:8788`, or `**` approved — plausible given F2 and a benign reason such as
+"reach a local service on 8788" — it may then call the admin API directly and approve its own (and
+any other sandbox's) requests, with no human in the loop at all.
+
+*Impact if confirmed.* Full bypass of the human gate: self-approval of arbitrary hosts for
+arbitrary sandboxes, plus access to `POST /api/sandboxes/{name}/register`. This would turn F2 from
+"needs a careless approval" into "needs one careless approval, then unlimited silent self-service".
+
+*Verification (on the host, not from inside a sandbox).* With the daemon running, add an allow
+rule for the admin port to a throwaway sandbox and probe it:
+
+[source,bash]
+----
+sbx policy allow network localhost:8788 --sandbox <sb>     # and/or host.docker.internal:8788
+sbx exec <sb> -- curl -s http://host.docker.internal:8788/api/health
+----
+
+If that returns `{"status":"ok"}` (the admin health body), the boundary is defeated once a loopback
+host is allowed, and this is effectively Critical. If it stays blocked or fails to connect, the
+loopback binding holds and F3 drops to informational.
+
+*Fix (defense in depth, independent of the verification outcome).* Do not rely on the bind
+address alone. Options, strongest first: require a secret on the admin API (a token the UI holds,
+the sandbox never sees); have the daemon reject admin-port requests whose source indicates they
+arrived via the proxy rather than genuine host loopback; and keep the admin port out of every kit's
+allowable set with a test that fails if it appears. Pair with F2 so a loopback host cannot be
+requested in the first place.
+
+*Status (2026-10-15): CONFIRMED on the host. The `127.0.0.1` bind is not a boundary against a
+sandbox.* Running `scripts/diagnose-admin-reachability.sh` on the host: with `localhost:8788` allowed
+for a throwaway sandbox, `sbx exec <sb> -- curl http://host.docker.internal:8788/api/health` returned
+`HTTP 200` and `{"status":"ok"}` - the daemon's loopback admin server answered a request originating
+inside the sandbox. So the proxy does re-originate to the host's loopback, and the only thing that was
+protecting the admin API was the default-deny network policy, not the bind address. (The script's
+self-approve probe returned 404 only because it had no live pending request id to approve - an
+artifact of the script, not a limit on the exposure: the admin approve/deny/register endpoints sit on
+the same unauthenticated server that just answered 200.)
+
+Severity is therefore *Critical*: once any loopback host - `localhost:8788`, a bare host-local alias,
+or a `**` catch-all - is on a sandbox's allow list, that sandbox can call the admin API directly and
+approve its own (and every other sandbox's) requests, with no human in the loop, plus drive
+`POST /api/sandboxes/{name}/register`.
+
+_What was checked from inside a sandbox beforehand:_ `curl host.docker.internal:8788` returns
+`403 Approval required for localhost:8788` (the proxy maps the admin destination to the host's
+`localhost:8788`, grantable, not hard-denied). Aside: this dev sandbox happens to have an `sbx` binary
+on `PATH`, but `sbx ls` reports "No sandboxes found" - it is not connected to the host daemon that
+governs this sandbox's egress (the proxy at `gateway.docker.internal:3128`), so it is not a
+policy-bypass, and standard kit sandboxes ship no `sbx` at all. Noted so a future reader doesn't
+mistake it for a finding.
+
+_Mitigation shipped (closes the goversbx-mediated trigger):_
+`RequestNetworkAccessTool.targetRejectionReason` rejects, before any request is created, a `host`
+that names a host-local alias (`localhost`, `127.0.0.1`, `::1`, `host.docker.internal`,
+`gateway.docker.internal`) on the daemon's own admin port, or with no port at all (which can mean all
+ports); wildcards are rejected earlier by `HostValidation` (F2). The admin port is threaded in from
+`Main` via `McpContext.build`. So a rogue agent can no longer get a human to approve "localhost:8788"
+or "`**`" _through goversbx_. Covered by `RequestNetworkAccessToolTest` and the contract test
+`McpProtocolTest.requestingTheDaemonsOwnAdminPortIsRejected`.
+
+_Not yet fixed - the real fix, now urgent._ The guard does not help if a loopback host is allowed
+*outside* goversbx: a human running `sbx policy allow network localhost:8788` by hand, a pre-existing
+`**` global rule, or any other local process on the host. Because the exposure is now *confirmed* and
+Critical, the bind-only boundary must be replaced by actually *authenticating the admin API* - a
+startup token the operator's browser holds (from the daemon log / a tokenized URL the launcher prints)
+and a sandbox never sees, required on every admin API + SSE call, with the static files staying public.
+This is the next step. It was not bundled into this pass because it changes operator UX (the UI must be
+opened with the token) and churns the admin contract suite, and it deserves its own focused change.
+
+=== F4 — The approval context is attacker-influenced (Low, by design)
+
+*What.* The only information the human weighs is the triple shown in the UI: sandbox name, host,
+and `reason`. `reason` is free text straight from the tool call (`RequestNetworkAccessTool`), the
+sandbox name is forgeable (F1), and the host can be broader than it looks (F2). An agent can supply
+an honest-sounding reason for a dishonest request.
+
+*Impact.* Social engineering of the approver. This is inherent to a human-in-the-loop approval
+model and cannot be fully removed; the MVP already accepts "no authn, human decides" as its
+posture. The UI does escape all three fields for HTML (`app.js` `escapeHtml`), so there is no
+stored-XSS angle in the admin page itself — the risk is purely the human's judgement.
+
+*Mitigation.* The lever is to make the two _factual_ fields trustworthy so the human only has to
+judge the `reason`: fix F1 so the sandbox name is verified, and F2 so the host is a real single
+host. Optionally surface request metadata the agent cannot shape (e.g. the verified sandbox's
+workspace path from `sbx ls`) next to the agent-supplied reason, and visually separate
+"attested by the daemon" fields from "claimed by the agent" ones. Residual risk remains and is
+accepted.
+
+'''
+
+== Notes
+
+* *Live probes left two pending requests* in the admin UI during this review
+ (`sec-review-A.example.com`, `sec-review-B.example.com`), one of them under the forged name from
+ F1. They are safe to deny; even if approved, the forged-name grant targets a non-existent sandbox
+ and sbx errors harmlessly.
+* *Next threats to work through* (to be expanded as their own sections): T2 — a rogue agent
+ disrupts or denies service to other sandboxes' requests (e.g. the shared in-memory store, the
+ reactive registration touching every running sandbox); T3 — information disclosure across
+ sandboxes via the daemon; T4 — host-side exposure of the daemon beyond the intended loopback/
+ sandbox split (binds, ports published, secrets in logs).

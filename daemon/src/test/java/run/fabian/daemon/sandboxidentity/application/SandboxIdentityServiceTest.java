@@ -6,11 +6,12 @@ import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SandboxIdentityServiceTest {
@@ -26,7 +27,7 @@ class SandboxIdentityServiceTest {
     }
 
     @Test
-    void registersWithSandboxNameAsTheSubstitutedValue() {
+    void registersWithASecretTokenAsTheSubstitutedValue() {
         AtomicReference<Call> lastCall = new AtomicReference<>();
         SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {
             lastCall.set(new Call(sandboxName, targetHost, envVarName, placeholder, value));
@@ -46,7 +47,11 @@ class SandboxIdentityServiceTest {
         assertEquals("localhost", call.targetHost());
         assertEquals("GOVERSBX_SANDBOX_TOKEN", call.envVarName());
         assertEquals("the-placeholder", call.placeholder());
-        assertEquals("sandbox-1", call.value());
+        // The substituted value is a secret token, not the sandbox name (F1): a value a sandbox could
+        // supply itself must never resolve to an identity. The token resolves back to the name.
+        assertNotEquals("sandbox-1", call.value());
+        assertTrue(call.value().startsWith("gvsbx-"), call.value());
+        assertEquals(Optional.of("sandbox-1"), service.resolveSandboxName(call.value()));
     }
 
     @Test
@@ -63,14 +68,26 @@ class SandboxIdentityServiceTest {
     }
 
     @Test
-    void recognizesTheUnsubstitutedPlaceholder() {
+    void resolvesOnlyMintedTokensNotNamesOrThePlaceholder() {
+        AtomicReference<String> mintedToken = new AtomicReference<>();
+        SbxCustomSecretPort port = (n, t, e, p, value) -> {
+            mintedToken.set(value);
+            return new SbxCustomSecretPort.Result(true, "ok");
+        };
         SandboxIdentityService service = new SandboxIdentityService(
-                (n, t, e, p, v) -> new SbxCustomSecretPort.Result(true, "ok"),
-                listing(), "localhost", "VAR", "the-placeholder");
+                port, listing(), "localhost", "VAR", "the-placeholder");
 
-        assertTrue(service.isUnsubstitutedPlaceholder("the-placeholder"));
-        assertFalse(service.isUnsubstitutedPlaceholder("some-real-sandbox-name"));
-        assertFalse(service.isUnsubstitutedPlaceholder("unknown-sandbox"));
+        service.register("real-sandbox");
+
+        // Only the minted token resolves to the sandbox.
+        assertEquals(Optional.of("real-sandbox"), service.resolveSandboxName(mintedToken.get()));
+        // The raw placeholder does not - the sandbox isn't substituted yet.
+        assertEquals(Optional.empty(), service.resolveSandboxName("the-placeholder"));
+        // The sandbox's own name, supplied by hand, does not - this is the forgery F1 closes.
+        assertEquals(Optional.empty(), service.resolveSandboxName("real-sandbox"));
+        // Nor any other guessed value, nor a missing header.
+        assertEquals(Optional.empty(), service.resolveSandboxName("some-other-sandbox"));
+        assertEquals(Optional.empty(), service.resolveSandboxName(null));
     }
 
     @Test

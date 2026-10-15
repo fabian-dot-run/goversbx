@@ -61,7 +61,7 @@ class McpProtocolTest {
 
     @Test
     void pendingThenCheckStatusThroughApproval() {
-        Mcp mcp = daemon.mcp("proto-pending").initialize();
+        Mcp mcp = daemon.asSandbox("proto-pending");
         String first = Mcp.text(mcp.callTool("request_network_access",
                 Mcp.args("host", "pending.example", "reason", "r", "timeoutSeconds", 1)));
         assertTrue(first.startsWith("Still pending"), first);
@@ -114,6 +114,23 @@ class McpProtocolTest {
     }
 
     @Test
+    void requestingTheDaemonsOwnAdminPortIsRejected() {
+        // F3 guard: a sandbox must not be able to get the loopback admin API opened to itself. The
+        // guard runs before identity resolution, so no registered token is needed to exercise it.
+        Mcp mcp = daemon.mcp("guard").initialize();
+        JsonNode admin = mcp.callTool("request_network_access",
+                Mcp.args("host", "host.docker.internal:" + daemon.adminPort, "reason", "exfil", "timeoutSeconds", 1));
+        assertTrue(Mcp.isToolError(admin), admin.toString());
+        assertTrue(Mcp.text(admin).contains("admin API"), Mcp.text(admin));
+        assertTrue(daemon.requestsFor("host.docker.internal:" + daemon.adminPort).isEmpty(), "no request may be created");
+
+        JsonNode wildcard = mcp.callTool("request_network_access",
+                Mcp.args("host", "**", "reason", "everything", "timeoutSeconds", 1));
+        assertTrue(Mcp.isToolError(wildcard), wildcard.toString());
+        assertTrue(Mcp.text(wildcard).toLowerCase().contains("wildcard"), Mcp.text(wildcard));
+    }
+
+    @Test
     void unknownToolIsAnError() {
         JsonNode response = daemon.mcp("proto-unknown").initialize().callTool("no_such_tool", Mcp.args());
         assertTrue(response.has("error") || Mcp.isToolError(response), response.toString());
@@ -136,12 +153,14 @@ class McpProtocolTest {
     }
 
     @Test
-    void missingSandboxHeaderIsRecordedAsUnknownSandbox() {
-        Mcp mcp = daemon.mcp(null).initialize();
-        var call = mcp.requestAccessAsync("noheader.example", 30);
-        assertEquals("unknown-sandbox", daemon.awaitPending("noheader.example").path("sandboxName").asText());
-        daemon.decide(daemon.awaitPending("noheader.example").path("id").asText(), "deny");
-        call.join();
+    void missingSandboxHeaderIsTreatedAsUnregistered() {
+        // No identity header -> no token to resolve -> the daemon can't attribute the call to any
+        // sandbox, so it asks for a retry and creates no request (a client with no header must not be
+        // able to get access, nor land in the queue as some "unknown-sandbox").
+        String text = Mcp.text(daemon.mcp(null).initialize().callTool("request_network_access",
+                Mcp.args("host", "noheader.example", "reason", "r", "timeoutSeconds", 1)));
+        assertTrue(text.contains("registering it now"), text);
+        assertTrue(daemon.requestsFor("noheader.example").isEmpty(), "no request may be created without a resolvable identity");
     }
 
     @Test

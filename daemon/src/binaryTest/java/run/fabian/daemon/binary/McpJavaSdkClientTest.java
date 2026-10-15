@@ -17,10 +17,12 @@ class McpJavaSdkClientTest {
 
     @Test
     void fullSessionWithEveryClientCapability() {
-        try (DaemonProcess daemon = DaemonProcess.start(FakeSbx.create());
-             McpSyncClient client = McpClient
+        try (DaemonProcess daemon = DaemonProcess.start(FakeSbx.create())) {
+            // The sandbox's real minted token, injected the way the sbx proxy would.
+            String token = daemon.tokenFor("sdk-client");
+            try (McpSyncClient client = McpClient
                      .sync(HttpClientStreamableHttpTransport.builder("http://127.0.0.1:" + daemon.sandboxPort + "/mcp")
-                             .httpRequestCustomizer((builder, method, uri, body, ctx) -> builder.header("X-Goversbx-Sandbox-Name", "sdk-client"))
+                             .httpRequestCustomizer((builder, method, uri, body, ctx) -> builder.header("X-Goversbx-Sandbox-Name", token))
                              .build())
                      .requestTimeout(Duration.ofSeconds(60))
                      .clientInfo(new McpSchema.Implementation("sdk-client", "SDK client", "1.0"))
@@ -49,6 +51,7 @@ class McpJavaSdkClientTest {
                     .arguments(Map.of("requestId", id)).build());
             assertTrue(((McpSchema.TextContent) status.content().get(0)).text().startsWith("Approved"));
             client.ping();
+            }
         }
     }
 }

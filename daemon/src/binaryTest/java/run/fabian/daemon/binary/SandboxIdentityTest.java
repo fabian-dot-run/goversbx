@@ -3,6 +3,7 @@ package run.fabian.daemon.binary;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,8 +26,14 @@ class SandboxIdentityTest {
             assertTrue(placeholderCall(daemon).contains("registering it now"));
         }
         List<String> secrets = sbx.calls().stream().filter(c -> c.startsWith("secret")).toList();
-        assertEquals(List.of("secret set-custom --sandbox match-1 --host localhost --env GOVERSBX_SANDBOX_TOKEN"
-                + " --placeholder " + DaemonProcess.PLACEHOLDER + " --value match-1"), secrets);
+        assertEquals(1, secrets.size(), secrets.toString());
+        // The substituted value is a per-sandbox secret token (gvsbx-<random>), never the name - that
+        // is the F1 fix: a value a sandbox could type in by hand (its own or a victim's name) must not
+        // resolve to an identity.
+        assertTrue(secrets.get(0).matches("secret set-custom --sandbox match-1 --host localhost"
+                        + " --env GOVERSBX_SANDBOX_TOKEN --placeholder " + Pattern.quote(DaemonProcess.PLACEHOLDER)
+                        + " --value gvsbx-[A-Za-z0-9_-]+"),
+                secrets.get(0));
     }
 
     @Test

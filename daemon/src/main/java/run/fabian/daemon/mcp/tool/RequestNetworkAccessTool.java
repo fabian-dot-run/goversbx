@@ -10,6 +10,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 public final class RequestNetworkAccessTool {
 
@@ -17,7 +18,7 @@ public final class RequestNetworkAccessTool {
     }
 
     public static McpServerFeatures.SyncToolSpecification create(
-            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi) {
+            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi, int selfAdminPort) {
         Map<String, Object> hostProperty = new LinkedHashMap<>();
         hostProperty.put("type", "string");
         hostProperty.put("description", "Domain or host the agent needs to reach, e.g. api.example.com");
@@ -54,15 +55,15 @@ public final class RequestNetworkAccessTool {
         return McpServerFeatures.SyncToolSpecification.builder()
                 .tool(tool)
                 .callHandler((exchange, request) -> {
-                    String sandboxName = (String) exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY);
-                    return handle(networkAccessApi, sandboxIdentityApi, sandboxName, request);
+                    String identityHeader = (String) exchange.transportContext().get(McpContext.SANDBOX_NAME_CONTEXT_KEY);
+                    return handle(networkAccessApi, sandboxIdentityApi, selfAdminPort, identityHeader, request);
                 })
                 .build();
     }
 
     private static McpSchema.CallToolResult handle(
-            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi,
-            String sandboxName, McpSchema.CallToolRequest request) {
+            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi, int selfAdminPort,
+            String identityHeader, McpSchema.CallToolRequest request) {
         Map<String, Object> args = request.arguments();
         String host = stringArg(args, "host");
         String reason = stringArg(args, "reason");
@@ -75,7 +76,30 @@ public final class RequestNetworkAccessTool {
                     .build();
         }
 
-        if (sandboxIdentityApi.isUnsubstitutedPlaceholder(sandboxName)) {
+        // The host must be a well-formed, single hostname (threat-model F2: no wildcards, URLs, or IP
+        // literals) - checked through the published api, not networkaccess.domain directly ...
+        Optional<String> hostRejection = networkAccessApi.hostRejectionReason(host);
+        if (hostRejection.isPresent()) {
+            return McpSchema.CallToolResult.builder()
+                    .isError(true)
+                    .addTextContent(hostRejection.get())
+                    .build();
+        }
+        // ... and must not point at the daemon's own admin API (threat-model F3), which only this
+        // layer can check because only it knows the daemon's admin port.
+        String adminRejection = targetRejectionReason(host, selfAdminPort);
+        if (adminRejection != null) {
+            return McpSchema.CallToolResult.builder()
+                    .isError(true)
+                    .addTextContent(adminRejection)
+                    .build();
+        }
+
+        // Identity is whatever sandbox this token was minted for - never the raw header value, which a
+        // rogue agent could set to anything. An unresolvable value (placeholder, stale token after a
+        // daemon restart, or a forged value) triggers registration and a retry; no request is created.
+        Optional<String> resolvedSandbox = sandboxIdentityApi.resolveSandboxName(identityHeader);
+        if (resolvedSandbox.isEmpty()) {
             sandboxIdentityApi.registerAnyUnregisteredSandboxes();
             return McpSchema.CallToolResult.builder()
                     .addTextContent("This sandbox's identity isn't registered with the daemon yet - "
@@ -85,6 +109,7 @@ public final class RequestNetworkAccessTool {
                             + "the goversbx daemon log on the host.")
                     .build();
         }
+        String sandboxName = resolvedSandbox.get();
 
         try {
             NetworkAccessRequestView created = networkAccessApi.createRequest(sandboxName, host, reason);
@@ -111,6 +136,57 @@ public final class RequestNetworkAccessTool {
             case PENDING -> "Still pending - no human decision yet for '" + r.host()
                     + "'. Check back later with check_network_access_status(requestId=\"" + r.id() + "\").";
         };
+    }
+
+    /**
+     * Why a requested {@code host} points at the daemon's own admin API and must be rejected (or
+     * {@code null} if it's fine). Closes threat-model F3's goversbx-mediated path: a sandbox could
+     * otherwise ask a human to approve the daemon's own admin port and - since the loopback admin IS
+     * reachable from a sandbox via the proxy (confirmed, `scripts/diagnose-admin-reachability.sh`) -
+     * then self-approve everything. A bare host-local alias with no port is also refused, since that
+     * can mean "all ports" and would include the admin port. Legitimate host-service access (e.g.
+     * {@code host.docker.internal:3000}) is unaffected: it names a specific, non-admin port.
+     * Wildcards, URLs and IP literals are handled earlier by {@code HostValidation} (F2), not here.
+     */
+    static String targetRejectionReason(String host, int selfAdminPort) {
+        String h = host.trim().toLowerCase(java.util.Locale.ROOT);
+        String hostPart = h;
+        int port = -1;
+        if (h.startsWith("[")) {                                  // [ipv6] or [ipv6]:port
+            int end = h.indexOf(']');
+            if (end > 0) {
+                hostPart = h.substring(1, end);
+                if (end + 1 < h.length() && h.charAt(end + 1) == ':') {
+                    port = parsePort(h.substring(end + 2));
+                }
+            }
+        } else {
+            int colon = h.indexOf(':');
+            if (colon >= 0 && h.indexOf(':', colon + 1) < 0) {    // exactly one colon -> host:port
+                hostPart = h.substring(0, colon);
+                port = parsePort(h.substring(colon + 1));
+            }
+        }
+
+        boolean hostLocalAlias = switch (hostPart) {
+            case "localhost", "127.0.0.1", "::1",
+                 "host.docker.internal", "gateway.docker.internal" -> true;
+            default -> false;
+        };
+        if (hostLocalAlias && (port == selfAdminPort || port == -1)) {
+            return "Requesting '" + host + "' is not allowed: it points at the goversbx daemon's own "
+                    + "host-loopback, where the admin API lives. Request the specific external host and "
+                    + "port your command needs instead.";
+        }
+        return null;
+    }
+
+    private static int parsePort(String value) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private static String stringArg(Map<String, Object> args, String name) {

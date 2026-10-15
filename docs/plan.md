@@ -637,3 +637,55 @@ created/decided events; `AdminEventStream` serves them as SSE on the loopback ad
 replaces 2 s polling with the stream (15 s fallback poll) and lets a service worker own the
 notifications, tagged by request id. Other channels can subscribe to the same listener later, in a
 `notification` context of their own.
+
+## Revision (2026-10-15): sandbox identity uses a secret token, not the name (threat-model F1)
+
+A security review (`docs/threat-model.md`, threat T1) found the identity header forgeable, confirmed
+live against the running daemon: because the registered `set-custom --value` was the sandbox's own
+*name*, the post-substitution header the daemon sees for an honest sandbox is byte-identical to one a
+rogue agent supplies by hand (names are public, and a sandbox can POST any header straight to
+`:8787/mcp`). The "unforgeability, not secrecy" argument in the earlier `set-custom` revisions above
+was wrong - that is the historical record of the mistake, left verbatim.
+
+Fixed: the daemon now mints a random per-sandbox secret token (`gvsbx-<base64url>`) as the `--value`,
+keeps a private token->name map, and resolves the incoming header through it
+(`SandboxIdentityApi.resolveSandboxName`, replacing `isUnsubstitutedPlaceholder`). Any value that
+doesn't resolve - the placeholder, a stale token, or a forged value - triggers registration and a
+retry and creates no request. A sandbox only ever holds the placeholder; the proxy substitutes it to
+that sandbox's own token, so a forger can only ever resolve to itself or be rejected.
+
+No persistence needed across a daemon restart: the token in sbx outlives the daemon, the in-memory
+map does not, so a stale token simply doesn't resolve and self-heals via one re-registration (mints a
+fresh token, overwrites the sbx secret live) on the next retry - the same single "please retry" a new
+sandbox already does. Residue tracked under threat-model T2: the token map grows slowly (old tokens
+never evicted, each still maps only to its own sandbox), and an unresolvable value costs one `sbx ls`.
+
+The black-box contract suite learns each sandbox's token the way the proxy would
+(`DaemonProcess.asSandbox`/`tokenFor`, reading the `set-custom --value` from `FakeSbx` or the dry-run
+output). `./gradlew check` + `:daemon:binaryTestJar` pass; verified live that a forged header is now
+rejected with no request created. Not yet re-run end to end against a real sbx host.
+
+## Revision (2026-10-15): host-input validation (F2) and admin-port guard; F3 confirmed
+
+Continuing the security review (`docs/threat-model.adoc`).
+
+F2 (host was passed to `sbx policy allow` unvalidated): added
+`networkaccess.domain.HostValidation`, the single authority for what a requestable host is - a
+well-formed DNS hostname with an optional numeric port, rejecting wildcards, URLs/paths, whitespace,
+malformed labels, bad ports and all IP literals (an IP hides from the approver what is allowed and is
+the usual route to cloud metadata / internal ranges). Enforced as a domain invariant in
+`NetworkAccessService.createRequest` (throws `InvalidHostException`) and surfaced to the MCP tool
+through a new published `NetworkAccessApi.hostRejectionReason` (the `mcp` context must not import
+`networkaccess.domain`). Not covered: a valid hostname that resolves to a private/loopback IP - that
+is sbx/proxy enforcement, not input validation.
+
+F3 guard: `RequestNetworkAccessTool.targetRejectionReason` refuses a request that targets the
+daemon's own admin port on a host-local alias (or such an alias with no port). The admin port is
+threaded from `Main` through `McpContext.build`. This closes the path where a sandbox gets the admin
+port opened to itself *through goversbx*.
+
+F3 itself is now CONFIRMED on the host (`scripts/diagnose-admin-reachability.sh`): with
+`localhost:8788` allowed for a sandbox, `curl host.docker.internal:8788/api/health` from inside it
+returns 200 - the loopback bind is not a boundary, the proxy re-originates to host loopback. Severity
+Critical. The real fix (authenticate the admin API with a startup token the sandbox never sees) is the
+next step and is not in this pass. `./gradlew check` + `:daemon:binaryTestJar` pass.

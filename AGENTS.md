@@ -100,6 +100,10 @@ cleanly modularized). If you add a fourth concern to this daemon, give it the sa
 Within `networkaccess`: `domain` has zero framework dependencies (no Javalin, no Jetty, no MCP
 SDK, no `ProcessBuilder`) and owns its own invariants - e.g. `NetworkAccessRequest.approve()`/
 `.deny()` throw `AlreadyDecidedException` themselves rather than callers re-checking status first.
+Host input validation lives here too: `HostValidation` is the single rule for what a requestable host
+is (threat-model F2 - a plain hostname, no wildcards/URLs/IP literals), enforced as an invariant in
+`createRequest` (`InvalidHostException`) and exposed to the `mcp` tool via
+`NetworkAccessApi.hostRejectionReason` so that context never imports the domain directly.
 `application` (`NetworkAccessService`) orchestrates the domain through driven ports
 (`RequestRepository`, `SbxPolicyPort`) it doesn't know the implementation of. `adapter` implements
 those ports (`adapter.persistence`, `adapter.sbx`) and hosts the driving HTTP adapter
@@ -111,7 +115,12 @@ those ports (`adapter.persistence`, `adapter.sbx`) and hosts the driving HTTP ad
   (`GOVERSBX_ADMIN_PORT`, default 8788). This is a security boundary, not an accident: there's no
   authn in this MVP, and a sandbox must never be able to reach the approve/deny endpoints. If you
   add a new endpoint, think about which of the two it belongs on before adding it, and don't merge
-  them into one listener to "simplify" it.
+  them into one listener to "simplify" it. The `127.0.0.1` bind is necessary but may not be
+  sufficient on its own (the proxy can re-originate sandbox traffic as host loopback - threat-model
+  F3, `scripts/diagnose-admin-reachability.sh`), so `RequestNetworkAccessTool` additionally refuses a
+  network-access request that targets the daemon's own admin port (or a `*` wildcard):
+  `McpContext.build` is passed `selfAdminPort` for exactly this. Don't drop that argument or the
+  `targetRejectionReason` guard.
 - `SbxCliPolicyAdapter` and `SbxCliCustomSecretAdapter` both default to `GOVERSBX_SBX_DRY_RUN=true`
   (log the command they'd run instead of executing it). Don't flip this default - real sandboxes
   get their network policy and identity secret changed by these calls.
@@ -131,6 +140,15 @@ per-sandbox, and - this is the important part - **confirmed to apply to already-
 without a restart** (checked directly against `docker/sbx-releases`' GitHub release notes via
 `gh api`, not a search summary). That last point is why registration can be fully reactive:
 
+**The substituted `<v>` is a per-sandbox secret token, NOT the sandbox name** (F1 in
+`docs/threat-model.md`; the earlier name-as-value design was forgeable). The daemon mints a random
+`gvsbx-<base64url>` token per sandbox, registers it as `--value`, and keeps a private token &rarr;
+name map; `SandboxIdentityApi.resolveSandboxName(headerValue)` maps an incoming token back to its
+name. Do **not** change this back to the name "because unforgeability not secrecy": names are
+public, so a name-as-value lets a rogue agent set the header to any name by hand and be believed -
+the whole point is that the value is a secret a sandbox cannot know. A sandbox only ever holds the
+placeholder; the proxy substitutes it to that sandbox's own token.
+
 - Every agent's kit (`sandbox-kit/kits/goversbx-<agent>/`) sends the same
   **hardcoded literal** (`goversbx-sandbox-identity-placeholder-v1`) as the header value, never
   read from an env var. `claude mcp add --header` resolves its value once, at registration time,
@@ -139,13 +157,15 @@ without a restart** (checked directly against `docker/sbx-releases`' GitHub rele
   the daemon-side substitution rule can start applying at any later point, live. For pi, the
   literal must additionally never contain `${` or start with `!` - pi interpolates env vars and
   runs commands in MCP header values.
-- `McpContext.SANDBOX_NAME_HEADER`'s value arriving **unchanged** (still equal to the literal
-  placeholder) is the signal that a sandbox isn't registered yet -
-  `SandboxIdentityApi.isUnsubstitutedPlaceholder(...)`. `RequestNetworkAccessTool` checks this
-  before doing anything else; if true, it calls `registerAnyUnregisteredSandboxes()` (which runs
-  `sbx ls` and registers every running sandbox this daemon process doesn't already know about -
-  not just the one that triggered it) and tells the agent to retry, without creating a
-  `NetworkAccessRequest`.
+- A header value that **doesn't resolve to a token** (`SandboxIdentityApi.resolveSandboxName(...)`
+  returns empty) is the signal that a sandbox isn't usable yet: the raw placeholder (not registered),
+  a stale token (daemon restarted - the token in sbx outlives the in-memory map), or a forged value.
+  `RequestNetworkAccessTool` checks this before doing anything else; if empty, it calls
+  `registerAnyUnregisteredSandboxes()` (which runs `sbx ls` and registers every running sandbox this
+  daemon process doesn't already know about - not just the one that triggered it) and tells the agent
+  to retry, without creating a `NetworkAccessRequest`. This is also the **self-heal across a daemon
+  restart**, so no persistence is needed: the stale token doesn't resolve, one re-registration mints
+  a fresh one and overwrites the sbx secret live, and the next retry works.
 - `GOVERSBX_SBX_LS_FORMAT_ARGS` (default `--format json`) exists because `sbx ls`'s JSON flag
   spelling changed across `sbx` versions (`--json` before v0.48.0) - don't hardcode one spelling if
   you touch `SbxCliSandboxListAdapter`.

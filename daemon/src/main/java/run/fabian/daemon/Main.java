@@ -53,7 +53,7 @@ public final class Main {
                 sbxCustomSecretPort, sbxSandboxListPort, identityTargetHost, identityEnvVar, identityPlaceholder,
                 identitySandboxPattern);
 
-        McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService);
+        McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService, adminPort);
 
         Javalin sandboxApp = Javalin.create(config ->
                 config.jetty.modifyServletContextHandler(handler ->

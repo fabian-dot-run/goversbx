@@ -37,7 +37,7 @@ class DaemonLifecycleTest {
             Mcp placeholder = daemon.mcp(DaemonProcess.PLACEHOLDER).initialize();
             Mcp.text(placeholder.callTool("request_network_access", Mcp.args("host", "dry.example", "reason", "r", "timeoutSeconds", 1)));
 
-            Mcp mcp = daemon.mcp("dry-sb").initialize();
+            Mcp mcp = daemon.asSandbox("dry-sb");
             var call = mcp.requestAccessAsync("dry.example", 30);
             var decided = daemon.decide(daemon.awaitPending("dry.example").path("id").asText(), "approve");
             assertTrue(decided.path("sbxApplied").asBoolean(), decided.toString());

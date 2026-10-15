@@ -30,10 +30,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ClientCapabilityMatrixTest {
 
     private static DaemonProcess daemon;
+    private static String matrixToken;
 
     @BeforeAll
     static void start() {
         daemon = DaemonProcess.start(FakeSbx.create());
+        matrixToken = daemon.tokenFor("matrix");
     }
 
     @AfterAll
@@ -62,7 +64,7 @@ class ClientCapabilityMatrixTest {
         params.put("protocolVersion", "2025-11-25");
         params.set("capabilities", capabilities);
         params.set("clientInfo", clientInfo);
-        Mcp mcp = daemon.mcp("matrix").initialize(params.toString());
+        Mcp mcp = daemon.mcp(matrixToken).initialize(params.toString());
         assertEquals(2, mcp.request("tools/list", "{}").path("result").path("tools").size());
         assertEquals("Still pending", Mcp.text(mcp.callTool("request_network_access",
                 Mcp.args("host", "matrix.example", "reason", "r", "timeoutSeconds", 1))).substring(0, 13));

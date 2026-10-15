@@ -73,6 +73,26 @@ final class FakeSbx {
         }
     }
 
+    /**
+     * The identity token (the {@code --value}) from the most recent
+     * {@code secret set-custom --sandbox <name> ...} call, or null if there was none. Lets a test
+     * learn the token the daemon minted for a sandbox - the same value the sbx proxy would then
+     * substitute into that sandbox's identity header.
+     */
+    String tokenFor(String sandboxName) {
+        String marker = "secret set-custom --sandbox " + sandboxName + " ";
+        String token = null;
+        for (String call : calls()) {
+            if (call.startsWith(marker)) {
+                int i = call.indexOf("--value ");
+                if (i >= 0) {
+                    token = call.substring(i + "--value ".length()).trim();
+                }
+            }
+        }
+        return token;
+    }
+
     /** Every invocation so far, as its space-joined argv (without the binary itself). */
     List<String> calls() {
         try {

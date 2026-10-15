@@ -31,7 +31,7 @@ class AdminEventStreamTest {
             });
             awaitEvent(lines, "ready", "");
 
-            var call = daemon.mcp("sse-sb").initialize().requestAccessAsync("sse.example", 30);
+            var call = daemon.asSandbox("sse-sb").requestAccessAsync("sse.example", 30);
             JsonNode pending = daemon.awaitPending("sse.example");
             JsonNode created = awaitEvent(lines, "created", "sse.example");
             assertEquals(pending.path("id").asText(), created.path("id").asText());

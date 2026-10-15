@@ -6,6 +6,8 @@ import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
 import run.fabian.daemon.networkaccess.api.RequestStatus;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
+import run.fabian.daemon.networkaccess.domain.HostValidation;
+import run.fabian.daemon.networkaccess.domain.InvalidHostException;
 import run.fabian.daemon.networkaccess.domain.NetworkAccessRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,7 +41,16 @@ public final class NetworkAccessService implements NetworkAccessApi {
     }
 
     @Override
+    public Optional<String> hostRejectionReason(String host) {
+        return Optional.ofNullable(HostValidation.rejectionReason(host));
+    }
+
+    @Override
     public NetworkAccessRequestView createRequest(String sandboxName, String host, String reason) {
+        String rejection = HostValidation.rejectionReason(host);
+        if (rejection != null) {
+            throw new InvalidHostException(rejection);
+        }
         NetworkAccessRequest request = new NetworkAccessRequest(UUID.randomUUID(), sandboxName, host, reason, Instant.now());
         repository.add(request);
         NetworkAccessRequestView view = NetworkAccessRequestView.from(request);

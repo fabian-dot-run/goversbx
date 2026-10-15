@@ -7,6 +7,7 @@ import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
 import run.fabian.daemon.networkaccess.api.RequestStatus;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
 import run.fabian.daemon.networkaccess.domain.AlreadyDecidedException;
+import run.fabian.daemon.networkaccess.domain.InvalidHostException;
 
 import java.time.Duration;
 import java.util.List;
@@ -45,6 +46,18 @@ class NetworkAccessServiceTest {
         assertEquals(RequestStatus.PENDING, view.status());
         assertEquals("sandbox-1", view.sandboxName());
         assertEquals("api.example.com", view.host());
+    }
+
+    @Test
+    void createRequestRejectsAnInvalidHostAsAnInvariant() {
+        NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new RecordingSbxPolicyPort());
+
+        // No request is ever created for a wildcard / IP / malformed host, whatever the caller (F2).
+        assertThrows(InvalidHostException.class, () -> service.createRequest("sandbox-1", "**", "reason"));
+        assertThrows(InvalidHostException.class, () -> service.createRequest("sandbox-1", "169.254.169.254", "reason"));
+        assertTrue(service.hostRejectionReason("**").isPresent());
+        assertFalse(service.hostRejectionReason("api.example.com").isPresent());
+        assertEquals(0, service.list(RequestStatus.PENDING).size());
     }
 
     @Test

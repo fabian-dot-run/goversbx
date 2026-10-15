@@ -35,7 +35,7 @@ class AdminApiTest {
     }
 
     private static Pending pending(String sandbox, String host) {
-        CompletableFuture<JsonNode> call = daemon.mcp(sandbox).initialize().requestAccessAsync(host, 60);
+        CompletableFuture<JsonNode> call = daemon.asSandbox(sandbox).requestAccessAsync(host, 60);
         return new Pending(daemon.awaitPending(host), call);
     }
 

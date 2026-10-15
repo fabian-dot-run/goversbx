@@ -12,6 +12,14 @@ import java.util.UUID;
  */
 public interface NetworkAccessApi {
 
+    /**
+     * A reason the host is not acceptable to request a grant for (threat-model F2: wildcards, URLs, IP
+     * literals, malformed names), or empty if it's fine. Lets the {@code mcp} tool refuse a bad host
+     * with a clean message without reaching into {@code networkaccess.domain}; {@link #createRequest}
+     * enforces the same rule as an invariant regardless.
+     */
+    Optional<String> hostRejectionReason(String host);
+
     NetworkAccessRequestView createRequest(String sandboxName, String host, String reason);
 
     Optional<NetworkAccessRequestView> awaitDecision(UUID requestId, Duration timeout);

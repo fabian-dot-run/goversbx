@@ -23,7 +23,13 @@ public final class McpContext {
 
     /** Header a sandbox's kit-install step bakes into its MCP registration (see sandbox-kit). */
     public static final String SANDBOX_NAME_HEADER = "X-Goversbx-Sandbox-Name";
-    /** Key the sandbox name is published under in {@link io.modelcontextprotocol.server.McpSyncServerExchange#transportContext()}. */
+    /**
+     * Key the raw identity header value is published under in
+     * {@link io.modelcontextprotocol.server.McpSyncServerExchange#transportContext()}. This is the
+     * proxy-substituted secret token, not a sandbox name - a tool resolves it to a name via
+     * {@link run.fabian.daemon.sandboxidentity.api.SandboxIdentityApi#resolveSandboxName(String)}
+     * and must never trust it as a name directly.
+     */
     public static final String SANDBOX_NAME_CONTEXT_KEY = "sandboxName";
 
     private final HttpServletStreamableServerTransportProvider servlet;
@@ -34,7 +40,13 @@ public final class McpContext {
         this.server = server;
     }
 
-    public static McpContext build(NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi) {
+    /**
+     * @param selfAdminPort the daemon's own admin port, which a sandbox must never be able to get
+     *     opened to itself through goversbx (see threat-model F3); passed to the request tool so it
+     *     can reject a request that targets it.
+     */
+    public static McpContext build(
+            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi, int selfAdminPort) {
         McpJsonMapper jsonMapper = new JacksonMcpJsonMapperSupplier().get();
 
         HttpServletStreamableServerTransportProvider servlet = HttpServletStreamableServerTransportProvider.builder()
@@ -48,7 +60,7 @@ public final class McpContext {
                 .serverInfo("goversbx-network", "0.2.0")
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .tools(
-                        RequestNetworkAccessTool.create(networkAccessApi, sandboxIdentityApi),
+                        RequestNetworkAccessTool.create(networkAccessApi, sandboxIdentityApi, selfAdminPort),
                         CheckNetworkAccessStatusTool.create(networkAccessApi))
                 .build();
 

@@ -123,6 +123,44 @@ final class DaemonProcess implements AutoCloseable {
         return new Mcp(sandboxApi("/mcp"), sandboxHeader);
     }
 
+    /**
+     * An initialized MCP session that acts as a registered sandbox: it carries the real identity
+     * token the daemon minted for {@code name} (via {@link #tokenFor}), the way the sbx proxy would
+     * substitute it into the sandbox's header. Use this instead of {@code mcp(name)} wherever a
+     * request_network_access call must actually create a request - a bare name is no longer trusted.
+     */
+    Mcp asSandbox(String name) {
+        return mcp(tokenFor(name)).initialize();
+    }
+
+    /**
+     * Registers {@code name} through the loopback admin endpoint (what an operator pre-warming a
+     * sandbox does) and returns the identity token the daemon injected for it - read from the
+     * daemon's dry-run output, or, in real mode, from the {@link FakeSbx} recording of the
+     * {@code secret set-custom} argv. This is the trusted, host-side channel standing in for the
+     * sbx proxy; a sandbox can never obtain this value.
+     */
+    String tokenFor(String name) {
+        HttpResponse<String> response = postJson(admin("/api/sandboxes/" + name + "/register"), "");
+        if (response.statusCode() != 200) {
+            fail("register " + name + " -> " + response.statusCode() + ": " + response.body());
+        }
+        String output = parse(response.body()).path("output").asText("");
+        String token = valueArg(output);              // dry run: command (with --value) is in the output
+        if (token == null) {
+            token = sbx.tokenFor(name);               // real mode: read it from the recorded argv
+        }
+        if (token == null || token.isBlank()) {
+            fail("no identity token minted for " + name + "; register output: " + output + "; sbx calls: " + sbx.calls());
+        }
+        return token;
+    }
+
+    private static String valueArg(String command) {
+        int i = command.indexOf("--value ");
+        return i < 0 ? null : command.substring(i + "--value ".length()).trim();
+    }
+
     HttpResponse<String> get(URI uri) {
         return send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10)).build());
     }

@@ -113,7 +113,9 @@ class RecordedClientReplayTest {
             }
         }
         if (sessionId != null && !deleted) {
-            Mcp mcp = new Mcp(daemon.sandboxApi("/mcp"), sandbox);
+            // The recorded handshake needs no identity (initialize/tools-list don't), but the tool
+            // call that follows does: send the sandbox's real minted token the way the proxy would.
+            Mcp mcp = new Mcp(daemon.sandboxApi("/mcp"), daemon.tokenFor(sandbox));
             mcp.sessionId = sessionId;
             String text = Mcp.text(mcp.callTool("request_network_access",
                     Mcp.args("host", sandbox + ".example", "reason", "replay", "timeoutSeconds", 1)));
