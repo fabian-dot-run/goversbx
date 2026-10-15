@@ -15,6 +15,7 @@
 #   goversbx stop      stop a daemon started by this script
 #   goversbx status    daemon state, ports, log location
 #   goversbx logs      follow the daemon log
+#   goversbx dashboard open the admin UI in your default browser
 #   goversbx version   installed release version ("dev" in a repo checkout)
 #
 # The daemon keeps running after the sandbox session ends - it serves every sandbox; stop it with
@@ -144,6 +145,17 @@ stop_daemon() {
   fi
 }
 
+open_dashboard() { # open the admin UI in the default browser, at the configured admin port
+  if ! healthy; then
+    die "daemon not running on $ADMIN - start it with 'goversbx start' (or 'goversbx run ...')"
+  fi
+  local opener="" o
+  for o in open xdg-open; do command -v "$o" >/dev/null 2>&1 && { opener="$o"; break; }; done
+  [ -n "$opener" ] || die "no browser opener found (open/xdg-open) - open $ADMIN yourself"
+  say "opening $ADMIN"
+  "$opener" "$ADMIN" >/dev/null 2>&1 &
+}
+
 sandbox_exists() { # $1 = name
   "$SBX" ls --format json 2>/dev/null | grep -q "\"name\": *\"$1\""
 }
@@ -197,8 +209,9 @@ case "$cmd" in
     fi
     echo "admin UI: $ADMIN   sandbox port: $SANDBOX_API_PORT   log: $LOG_FILE" ;;
   logs) exec tail -f "$LOG_FILE" ;;
+  dashboard) open_dashboard ;;
   version|--version)
     if [ -f "$SCRIPT_DIR/../share/goversbx/VERSION" ]; then cat "$SCRIPT_DIR/../share/goversbx/VERSION"
     else echo "dev ($REPO_DIR)"; fi ;;
-  *) sed -n '2,32p' "$SELF" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 1 ;;
+  *) sed -n '2,33p' "$SELF" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 1 ;;
 esac
