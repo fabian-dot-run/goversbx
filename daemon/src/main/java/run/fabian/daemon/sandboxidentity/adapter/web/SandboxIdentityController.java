@@ -1,7 +1,7 @@
 package run.fabian.daemon.sandboxidentity.adapter.web;
 
 import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
-import io.javalin.Javalin;
+import io.javalin.router.JavalinDefaultRoutingApi;
 
 import java.util.Map;
 
@@ -18,8 +18,8 @@ public final class SandboxIdentityController {
         this.service = service;
     }
 
-    public void registerRoutes(Javalin app) {
-        app.post("/api/sandboxes/{name}/register", ctx -> {
+    public void registerRoutes(JavalinDefaultRoutingApi routes) {
+        routes.post("/api/sandboxes/{name}/register", ctx -> {
             String name = ctx.pathParam("name");
             if (name == null || name.isBlank()) {
                 ctx.status(400).json(Map.of("error", "sandbox name is required"));

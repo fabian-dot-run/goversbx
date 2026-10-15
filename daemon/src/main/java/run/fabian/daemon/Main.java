@@ -21,7 +21,7 @@ import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
-import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,24 +61,26 @@ public final class Main {
 
         McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService, adminPort);
 
-        Javalin sandboxApp = Javalin.create(cfg ->
-                cfg.jetty.modifyServletContextHandler(handler ->
-                        handler.addServlet(new ServletHolder(mcp.servlet()), "/mcp/*")));
-        sandboxApp.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
+        // Javalin 7: routes are registered on config.routes inside create(...), not on the instance.
+        Javalin sandboxApp = Javalin.create(cfg -> {
+            cfg.jetty.modifyServletContextHandler(handler ->
+                    handler.addServlet(new ServletHolder(mcp.servlet()), "/mcp/*"));
+            cfg.routes.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
+        });
         sandboxApp.start(sandboxApiBind, sandboxApiPort);
         log.info("Sandbox-facing MCP endpoint listening on {}:{}/mcp", sandboxApiBind, sandboxApiPort);
 
+        AdminEventStream eventStream = new AdminEventStream(networkAccessService);
         Javalin adminApp = Javalin.create(cfg -> {
             cfg.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false));
             cfg.staticFiles.add("/public");
+            // Token gate first, so it runs before any admin API/SSE handler (static files + /api/health
+            // stay public). The loopback bind is not a boundary against a sandbox - see threat-model F3.
+            AdminTokenFilter.register(cfg.routes, config.adminToken());
+            new AdminApiController(networkAccessService).registerRoutes(cfg.routes);
+            eventStream.registerRoutes(cfg.routes);
+            new SandboxIdentityController(sandboxIdentityService).registerRoutes(cfg.routes);
         });
-        // Token gate first, so it runs before any admin API/SSE handler (static files + /api/health
-        // stay public). The loopback bind is not a boundary against a sandbox - see threat-model F3.
-        AdminTokenFilter.register(adminApp, config.adminToken());
-        new AdminApiController(networkAccessService).registerRoutes(adminApp);
-        AdminEventStream eventStream = new AdminEventStream(networkAccessService);
-        eventStream.registerRoutes(adminApp);
-        new SandboxIdentityController(sandboxIdentityService).registerRoutes(adminApp);
         adminApp.start("127.0.0.1", adminPort);
         log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only, token-gated)", adminPort);
 

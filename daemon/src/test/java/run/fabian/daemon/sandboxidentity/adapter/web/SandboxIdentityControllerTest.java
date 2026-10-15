@@ -3,10 +3,10 @@ package run.fabian.daemon.sandboxidentity.adapter.web;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 import io.javalin.testtools.JavalinTest;
-import okhttp3.MediaType;
-import okhttp3.RequestBody;
-import okhttp3.Response;
+import io.javalin.testtools.Response;
 import org.junit.jupiter.api.Test;
+
+import java.net.http.HttpRequest;
 import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
 import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
@@ -20,9 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SandboxIdentityControllerTest {
 
     private static Javalin newApp(SandboxIdentityService service) {
-        Javalin app = Javalin.create(config -> config.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false)));
-        new SandboxIdentityController(service).registerRoutes(app);
-        return app;
+        return Javalin.create(config -> {
+            config.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false));
+            new SandboxIdentityController(service).registerRoutes(config.routes);
+        });
     }
 
     @Test
@@ -33,7 +34,7 @@ class SandboxIdentityControllerTest {
 
         JavalinTest.test(newApp(service), (server, client) -> {
             Response response = client.request("/api/sandboxes/sandbox-1/register",
-                    b -> b.post(RequestBody.create("", MediaType.get("application/json"))));
+                    b -> b.post(HttpRequest.BodyPublishers.ofString("")));
 
             assertEquals(200, response.code());
             SandboxRegistrationResult result =

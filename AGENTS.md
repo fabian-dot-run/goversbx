@@ -217,11 +217,16 @@ registered through.
   the same JVM.
 - The `javalin-testtools` artifact version must track the `javalin` version exactly
   (`gradle/libs.versions.toml`) - they're versioned in lockstep by upstream.
-- **Javalin is held at 6.x on purpose.** Javalin 7 is a major migration (Jetty 12: the
-  `org.eclipse.jetty.servlet` package moved, and the `Context`/routing/SSE/before-filter API changed),
-  which touches the MCP servlet mounting (`Main`), the admin controllers, SSE and the token filter.
-  Don't bump it as a routine dependency update - it needs its own change with the v7 migration guide
-  and a full `binaryTestNative` pass. JUnit (6.x), Jackson (2.x classic) and slf4j track latest.
+- **Javalin 7 specifics** (migrated from 6 in 2026-10): routes are registered on `config.routes`
+  (a `JavalinDefaultRoutingApi` with `get`/`post`/`before`/`sse`/`exception`) **inside**
+  `Javalin.create(cfg -> { ... })`, not on the `Javalin` instance (`app.get(...)` no longer exists).
+  So the controllers/filter take a `JavalinDefaultRoutingApi`, and `Main` registers them in the
+  create lambda. Jetty is 12/EE10: `ServletHolder`/`ServletContextHandler` are
+  `org.eclipse.jetty.ee10.servlet.*`. `SseClient.sendEvent` is `sendEvent(event, data, id)` (pass
+  `null` id). `javalin-testtools` 7 dropped OkHttp - its `Response`/`Request.Builder` wrap
+  `java.net.http`, and there's no raw-client accessor (drive SSE in tests with `java.net.http`
+  directly). `Context`, `JavalinJackson`, `config.staticFiles.add`, `UnauthorizedResponse` are
+  unchanged. JUnit (6.x), Jackson (2.x classic) and slf4j track latest.
 
 ## MCP Java SDK notes
 

@@ -3,7 +3,7 @@ package run.fabian.daemon.networkaccess.adapter.web;
 import run.fabian.daemon.networkaccess.api.RequestStatus;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.domain.AlreadyDecidedException;
-import io.javalin.Javalin;
+import io.javalin.router.JavalinDefaultRoutingApi;
 
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -22,17 +22,17 @@ public final class AdminApiController {
         this.service = service;
     }
 
-    public void registerRoutes(Javalin app) {
-        app.exception(NoSuchElementException.class, (e, ctx) -> ctx.status(404).json(Map.of("error", "not found")));
-        app.exception(AlreadyDecidedException.class, (e, ctx) -> ctx.status(409).json(Map.of("error", "already decided")));
+    public void registerRoutes(JavalinDefaultRoutingApi routes) {
+        routes.exception(NoSuchElementException.class, (e, ctx) -> ctx.status(404).json(Map.of("error", "not found")));
+        routes.exception(AlreadyDecidedException.class, (e, ctx) -> ctx.status(409).json(Map.of("error", "already decided")));
 
-        app.get("/api/requests", ctx -> {
+        routes.get("/api/requests", ctx -> {
             String statusParam = ctx.queryParam("status");
             RequestStatus filter = statusParam == null ? null : RequestStatus.valueOf(statusParam.toUpperCase());
             ctx.json(service.list(filter));
         });
 
-        app.post("/api/requests/{id}/approve", ctx -> {
+        routes.post("/api/requests/{id}/approve", ctx -> {
             UUID id = parseId(ctx.pathParam("id"));
             if (id == null) {
                 ctx.status(400).json(Map.of("error", "invalid id"));
@@ -41,7 +41,7 @@ public final class AdminApiController {
             ctx.json(service.approve(id, decidedBy(ctx)));
         });
 
-        app.post("/api/requests/{id}/deny", ctx -> {
+        routes.post("/api/requests/{id}/deny", ctx -> {
             UUID id = parseId(ctx.pathParam("id"));
             if (id == null) {
                 ctx.status(400).json(Map.of("error", "invalid id"));
@@ -50,7 +50,7 @@ public final class AdminApiController {
             ctx.json(service.deny(id, decidedBy(ctx)));
         });
 
-        app.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
+        routes.get("/api/health", ctx -> ctx.json(Map.of("status", "ok")));
     }
 
     private static String decidedBy(io.javalin.http.Context ctx) {

@@ -721,3 +721,26 @@ Tests: `AdminTokenFilterTest`, `AdminAuthTest` (401/200, header+query, health/st
 black-box suite sets a fixed `GOVERSBX_ADMIN_TOKEN` and carries it on admin calls; auto-open is off by
 default in tests and driven via a recording opener where tested. `./gradlew check` +
 `:daemon:binaryTestJar` pass.
+
+## Revision (2026-10-15): Javalin 6 -> 7 (Jetty 12 / EE10)
+
+Major framework upgrade, held back from the previous dependency pass because it is breaking.
+
+- Routing moved off the `Javalin` instance onto `config.routes` (a `JavalinDefaultRoutingApi`):
+  `get`/`post`/`before`/`sse`/`exception` are now registered inside `Javalin.create(cfg -> { ... })`.
+  The admin controllers, `AdminEventStream` and `AdminTokenFilter` take a `JavalinDefaultRoutingApi`
+  instead of a `Javalin`, and `Main` wires them in the create lambda (both the sandbox and admin apps).
+- Jetty is now 12/EE10: `ServletHolder`/`ServletContextHandler` moved to `org.eclipse.jetty.ee10.servlet`
+  (the MCP servlet mount in `Main` and `McpEndpointIntegrationTest`). `SseClient.sendEvent` is the
+  3-arg `sendEvent(event, data, id)` (id null).
+- `javalin-testtools` 7 dropped OkHttp: its `Response`/`Request.Builder` wrap `java.net.http`
+  (`response.code()`/`body().string()` unchanged; request bodies are `HttpRequest.BodyPublisher`), and
+  it has no raw-client accessor, so the fast SSE test drives the stream with `java.net.http` directly.
+- `Context`, `JavalinJackson(ObjectMapper, boolean)`, `config.staticFiles.add`, `UnauthorizedResponse`
+  are unchanged.
+
+Verified on the JVM: `./gradlew check` + `:daemon:binaryTestJar` green (unit, javalin-testtools
+integration, and the black-box contract suite). The native-image path (Jetty 12 metadata) is gated by
+`binaryTestNative` in the release workflow - if a native-only metadata gap appears, it fails there
+before anything is published. API facts were taken from `javap` against the real 7.2.3 jars, per the
+project convention.

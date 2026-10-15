@@ -1,6 +1,6 @@
 [versions]
 jackson = "2.22.3"
-javalin = "6.4.0"
+javalin = "7.2.3"
 slf4j = "2.0.20"
 mcp-sdk = "2.0.1"
 junit = "6.1.3"

@@ -1,7 +1,7 @@
 package run.fabian.daemon.admin;
 
-import io.javalin.Javalin;
 import io.javalin.http.UnauthorizedResponse;
+import io.javalin.router.JavalinDefaultRoutingApi;
 
 /**
  * Requires the admin token on every admin API and SSE call (threat-model F3). The loopback bind is
@@ -20,8 +20,8 @@ public final class AdminTokenFilter {
     private AdminTokenFilter() {
     }
 
-    public static void register(Javalin app, String token) {
-        app.before("/api/*", ctx -> {
+    public static void register(JavalinDefaultRoutingApi routes, String token) {
+        routes.before("/api/*", ctx -> {
             if (ctx.path().equals("/api/health")) {
                 return;
             }

@@ -1,7 +1,7 @@
 package run.fabian.daemon.networkaccess.adapter.web;
 
-import io.javalin.Javalin;
 import io.javalin.http.sse.SseClient;
+import io.javalin.router.JavalinDefaultRoutingApi;
 import run.fabian.daemon.networkaccess.api.NetworkAccessListener;
 import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
@@ -21,8 +21,8 @@ public final class AdminEventStream {
         this.service = service;
     }
 
-    public void registerRoutes(Javalin app) {
-        app.sse("/api/events", client -> {
+    public void registerRoutes(JavalinDefaultRoutingApi routes) {
+        routes.sse("/api/events", client -> {
             client.keepAlive();
             Runnable unsubscribe = service.subscribe(new Forwarder(client));
             connectedClients.incrementAndGet();
@@ -60,7 +60,7 @@ public final class AdminEventStream {
     private static void send(SseClient client, String event, String json) {
         synchronized (client) {
             if (!client.terminated()) {
-                client.sendEvent(event, json);
+                client.sendEvent(event, json, null);   // Javalin 7: sendEvent(event, data, id)
             }
         }
     }

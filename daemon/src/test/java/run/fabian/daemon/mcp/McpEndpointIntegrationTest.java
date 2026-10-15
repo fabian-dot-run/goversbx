@@ -6,7 +6,7 @@ import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpSchema;
-import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.junit.jupiter.api.Test;
 import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestRepository;
 import run.fabian.daemon.networkaccess.adapter.sbx.SbxCliPolicyAdapter;

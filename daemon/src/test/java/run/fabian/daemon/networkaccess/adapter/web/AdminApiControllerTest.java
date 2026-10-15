@@ -4,10 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 import io.javalin.testtools.JavalinTest;
-import okhttp3.MediaType;
-import okhttp3.RequestBody;
-import okhttp3.Response;
+import io.javalin.testtools.Response;
 import org.junit.jupiter.api.Test;
+
+import java.net.http.HttpRequest;
 import run.fabian.daemon.networkaccess.adapter.persistence.InMemoryRequestRepository;
 import run.fabian.daemon.networkaccess.adapter.sbx.SbxCliPolicyAdapter;
 import run.fabian.daemon.networkaccess.api.NetworkAccessRequestView;
@@ -21,13 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AdminApiControllerTest {
 
     private static Javalin newApp(NetworkAccessService service) {
-        Javalin app = Javalin.create(config -> config.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false)));
-        new AdminApiController(service).registerRoutes(app);
-        return app;
+        return Javalin.create(config -> {
+            config.jsonMapper(new JavalinJackson(JsonSupport.MAPPER, false));
+            new AdminApiController(service).registerRoutes(config.routes);
+        });
     }
 
-    private static RequestBody jsonBody(String json) {
-        return RequestBody.create(json, MediaType.get("application/json"));
+    private static HttpRequest.BodyPublisher jsonBody(String json) {
+        return HttpRequest.BodyPublishers.ofString(json);
     }
 
     @Test
