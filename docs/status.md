@@ -3,6 +3,71 @@
 Snapshot as of 2026-10-15. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## E2E suite + nested sbx dev sandbox unblocked (2026-10-21, inner docker-sbx 0.49.1)
+
+**New: `./gradlew :daemon:e2eTest`** (`daemon/src/e2eTest`, package `run.fabian.daemon.e2e`) - the
+end-to-end suite against a REAL sbx, replacing `scripts/e2e-claude.sh` as the primary e2e check (the
+bash scripts stay for pi/omp/opencode). Same black-box shape as `binaryTest`, but the daemon runs in
+real mode against the real CLI, and the agent side runs *inside* real throwaway sandboxes created
+with the Claude kit, through the sbx proxy. One shared fixture (`E2eEnvironment`), classes in
+`@Order`:
+
+1. `SbxCliContractTest` - the installed sbx still has the shape the daemon assumes (`ls --format json`
+   fields, `secret set-custom` flags, `policy allow network --sandbox`), every kit validates.
+2. `ClaudeKitTest` - what `sbx create --kit` installed: daemon reachable via the kit's allow-list,
+   `claude mcp list` connected, `~/.claude.json` carries the placeholder header + daemon URL (kit arg
+   `daemonPort` applied), skill, `~/.claude/CLAUDE.md` rule, proxy env present.
+3. `ApprovalFlowTest` - blocked before; raw placeholder -> "registering" + `set-custom` for both
+   sandboxes; pending request under the REAL name; approve -> `sbxApplied`, tool says Approved, host
+   200 from `-a` and still blocked from `-b`; `-b`'s request arrives as `-b`; denial leaves the host
+   blocked and runs no `policy allow`; `check_network_access_status` polling; wildcard and bare
+   `localhost` refused without creating requests.
+4. `DaemonRestartTest` - after `stop`+`start` with the same state dir the first call works (no "please
+   retry"); with `sandbox-registrations.json` deleted the stale token triggers re-registration and the
+   retry works (second `set-custom` in the log).
+5. `ClaudeAgentTest` (`@Tag("agent")`, only with `GOVERSBX_E2E_AGENTS=claude`) - real `claude -p`,
+   prompt without "goversbx", must create the request itself.
+
+Knobs: `GOVERSBX_E2E_*` (see `E2eConfig`), report `daemon/build/reports/tests/e2eTest`, logs and the
+daemon state in `daemon/build/e2e/<run>/`. Sandboxes `goversbx-e2e-<run>-{a,b}` are removed at the
+end unless `GOVERSBX_E2E_KEEP=1`; a refused workspace mount falls back to a workspace-less `-a`.
+
+**First real run (2026-10-21, inner sbx 0.49.1, Linux arm64): the whole chain works on 0.49.1** -
+kit-created sandboxes WITH a workspace bind mount, kit allow-list reaches the daemon, `claude mcp
+list` connected, reactive registration, proxy substitution to the real name, approval ->
+`sbx policy allow ... --sandbox` -> HTTP 200 from `-a` only, identity isolation, denial, polling,
+refusals, restart durability and recovery. Finding (sbx 0.49.1 behavior, not a daemon bug): **an idle
+sandbox - nothing attached, no `sbx exec` in flight - goes to `stopped` within about a minute**, and
+`sbx exec` starts it again on demand. So at the first reactive registration `sbx ls` listed only the
+sandbox whose call was in flight; the idle `-b` was skipped (correctly: a stopped sandbox cannot be
+calling) and got registered on its own first call. The suite's first version expected both to be
+registered in one round and `-a` to be "running" at rest; both expectations were relaxed to what sbx
+actually does (`lsReportsASandboxAsRunningWhileACommandRunsInIt` pins the part the daemon relies on).
+
+**Third run: green - 27 passed, 1 skipped (`ClaudeAgentTest`, needs Claude credentials in the inner sandbox; `GOVERSBX_E2E_AGENTS=claude` on the host), 7m28s, sandboxes removed.** Second finding (second run): `sbx ls --format json` can
+print `WARN: docker hub refresh lock held by another process: context deadline exceeded` - on stderr,
+as far as observed (the daemon, which reads stdout only, parsed every `sbx ls` of the run); the suite's
+first wrapper merged the streams and tripped over it. `Sbx` now keeps them apart and the contract test
+parses stdout alone, so it fails only if sbx ever puts such a warning on stdout - which would break the
+daemon's registration too.
+
+### Nested sbx dev sandbox: unblocked (supersedes "Paused" below)
+
+`goversbx-dev` was recreated with `--nested` on sbx 0.49.1. Inside it (this run): `apt-get install
+docker-sbx` (0.49.1), `sbx login` (run in the background by the agent, device code relayed to the
+user), `sbx policy init balanced`. **The 2026-10-14 "Docker account not enrolled" conclusion was
+wrong.** sandboxd's "policy load failed: auth token rejected" / "administrator settings are
+unavailable" (which disables `sbx kit validate`, `--kit`, workspace mounts and local allow rules) was
+the OUTER sandbox's policy blocking `hub.docker.com` and `api.docker.com` (found via `strings
+/usr/bin/sbx`: the token exchange goes through `hub.docker.com/v2/auth/token`). Approving
+`login.docker.com`, `api.sandboxes-cloud.docker.com`, `hub.docker.com`, `api.docker.com`,
+`auth.docker.com` through goversbx and `sbx daemon restart` fixed all of it: kit validates, per-sandbox
+allow rules work, no setting is "unavailable". Inner sandboxes' egress also passes the outer proxy, so
+the e2e target hosts (`example.org`, `example.net`) and the image pull hosts (`registry-1.docker.io`,
+`auth.docker.io`, `production.cloudfront.docker.com`) had to be approved there too. The Gradle build
+in a fresh incarnation needs `services.gradle.org`, `release-assets.githubusercontent.com`,
+`plugins.gradle.org`, `plugins-artifacts.gradle.org`, `repo.maven.apache.org`.
+
 ## Durable sandbox registrations (2026-10-15, 0.2.8, not yet released)
 
 The user's requirement: losing sandbox registrations on a daemon restart is not acceptable. Before,

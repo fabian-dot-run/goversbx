@@ -94,6 +94,35 @@ against the jar under GraalVM's tracing agent and builds the binary from that tr
 the suite doesn't exercise has no metadata, so it would fail only in the binary: new behavior
 needs a test here.
 
+### End-to-end suite against a real sbx
+
+`daemon/src/e2eTest` is the end-to-end suite: it starts the daemon jar **for real**
+(`GOVERSBX_SBX_DRY_RUN=false`), creates two throwaway sandboxes with the Claude kit (`sbx create
+--kit ...`), and checks every link of the chain from *inside* those sandboxes, through the sbx proxy:
+the sbx CLI still has the shape the daemon assumes; what the kit installed (`claude mcp list`, skill,
+`~/.claude/CLAUDE.md` rule, the placeholder header); raw placeholder -> reactive registration ->
+pending request under the real sandbox name -> approval -> `sbx policy allow` -> host reachable, and
+only from that sandbox; identity isolation between the two sandboxes; denial; polling; the tool's
+refusals; registrations surviving a daemon restart and recovering from a lost registration file; and,
+opt-in, real Claude Code picking goversbx on its own.
+
+```bash
+./gradlew :daemon:e2eTest                                   # sbx from PATH; report in daemon/build/reports/tests/e2eTest
+GOVERSBX_E2E_SBX=/usr/bin/sbx GOVERSBX_E2E_AGENTS=claude ./gradlew :daemon:e2eTest
+```
+
+It needs a signed-in `sbx`, pulls images, changes sandbox policies and takes a few minutes, so it is
+not part of `check`. It only registers and touches sandboxes named `goversbx-e2e-<run>-*`, and removes
+them at the end (`GOVERSBX_E2E_KEEP=1` keeps them). The target hosts (`GOVERSBX_E2E_TARGET_HOST`,
+default `example.org`, and `GOVERSBX_E2E_DENY_HOST`, default `example.net`) must be blocked for new
+sandboxes before the run. All knobs are documented in `E2eConfig`. Logs and the daemon's state dir
+land in `daemon/build/e2e/<run>/`.
+
+It runs on the host, or inside a `--nested` dev sandbox with `docker-sbx` installed (see
+`docs/status.md`, "Nested sbx dev sandbox"), which is how the agent runs it without a host round trip.
+The older per-agent scripts `scripts/e2e-{claude,pi,omp,opencode}.sh` remain for the pi, oh-my-pi and
+opencode kits.
+
 ## Quick start (repo checkout)
 
 ```bash
@@ -277,7 +306,7 @@ itself.
 ## Status
 
 **Current state, the Claude Code MVP test runbook, and open questions: [`docs/status.md`](docs/status.md).**
-End-to-end test against a real sbx host: `scripts/e2e-claude.sh` (run on the host).
+End-to-end test against a real sbx: `./gradlew :daemon:e2eTest` (see "End-to-end suite" above).
 
 **The Claude Code MVP is verified end to end against a real sbx host (2026-10-14):** reactive
 sandbox identity, proxy substitution, approval -> `sbx policy allow` -> host reachable, identity

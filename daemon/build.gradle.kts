@@ -108,6 +108,49 @@ registerBinaryTest("binaryTestNative", "Contract tests against the native binary
 
 tasks.named("check") { dependsOn(binaryTestJar) }
 
+// End-to-end suite against a REAL sbx (src/e2eTest): starts the daemon jar for real
+// (GOVERSBX_SBX_DRY_RUN=false), creates throwaway sandboxes with the kits, and checks every link of
+// the chain from inside those sandboxes (through the sbx proxy). Not part of `check` - it needs a
+// signed-in `sbx`, pulls images, changes sandbox policies, and takes minutes. Run it on the host, or
+// inside a `--nested` dev sandbox with docker-sbx installed:
+//   ./gradlew :daemon:e2eTest                       # sbx from PATH
+//   GOVERSBX_E2E_SBX=/usr/bin/sbx ./gradlew :daemon:e2eTest
+// Knobs are GOVERSBX_E2E_* env vars, documented in E2eConfig. Report: build/reports/tests/e2eTest.
+val e2eTest: SourceSet by sourceSets.creating
+
+dependencies {
+    "e2eTestImplementation"(libs.junit.jupiter)
+    "e2eTestImplementation"(libs.jackson.databind)
+    "e2eTestRuntimeOnly"(libs.junit.platform.launcher)
+    "e2eTestRuntimeOnly"(libs.slf4j.simple)
+}
+
+tasks.register<Test>("e2eTest") {
+    group = "verification"
+    description = "End-to-end suite against a real sbx: real daemon, real throwaway sandboxes, real policy changes."
+    testClassesDirs = e2eTest.output.classesDirs
+    classpath = e2eTest.runtimeClasspath
+    useJUnitPlatform()
+    dependsOn(tasks.shadowJar)
+    inputs.file(fatJar)
+    inputs.dir(layout.projectDirectory.dir("../sandbox-kit/kits"))
+    // It talks to the outside world; a cached "passed" means nothing.
+    outputs.upToDateWhen { false }
+    systemProperty("goversbx.daemon.jar", fatJar.get().asFile.absolutePath)
+    systemProperty("goversbx.kitsDir", layout.projectDirectory.dir("../sandbox-kit/kits").asFile.absolutePath)
+    systemProperty("goversbx.e2e.runDir", layout.buildDirectory.dir("e2e").get().asFile.absolutePath)
+    // The whole chain (image pull, two sandboxes, a daemon) is slow the first time; the suite has its
+    // own, tighter waits for the individual steps.
+    systemProperty("junit.jupiter.execution.timeout.default", "20 m")
+    // One sandbox set is shared by every class, in a fixed order - never parallel.
+    maxParallelForks = 1
+    testLogging {
+        events("passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = true
+    }
+}
+
 graalvmNative {
     toolchainDetection.set(false)
     metadataRepository {

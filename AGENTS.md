@@ -15,6 +15,7 @@ verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 ./gradlew :sandbox-kit:packageKits   # zip each sbx kit (also: syncKitSkills after editing the skill)
 ./gradlew :daemon:binaryTestJar      # contract suite (src/binaryTest) against the jar - part of check
 ./gradlew :daemon:binaryTestNative   # trace -> native binary -> contract suite (GRAALVM_HOME + C toolchain)
+./gradlew :daemon:e2eTest            # e2e suite (src/e2eTest) against a REAL signed-in sbx: real daemon, real sandboxes, real policy changes
 scripts/package-release.sh           # everything above + release tarball for this platform
 scripts/testing/record-client-fixtures.sh   # re-record real Claude Code/pi/opencode MCP traffic
 scripts/goversbx run claude ~/ws     # on the HOST: start the daemon if needed, then sbx run --kit ...
@@ -22,6 +23,8 @@ scripts/e2e-claude.sh                # end-to-end test on a real sbx HOST (not f
 scripts/diagnose-substitution.sh     # on the HOST: which `set-custom --host` forms the proxy substitutes
 ```
 
+`./gradlew :daemon:e2eTest` is the e2e suite proper (`GOVERSBX_E2E_*` knobs in `E2eConfig`; runs on the host
+or inside the nested dev sandbox, see `docs/status.md`). The bash scripts remain for the pi/omp/opencode kits.
 `scripts/e2e-claude.sh` takes `SBX=<binary>`; to check changes to the script from inside a sandbox,
 run it against the stub `scripts/testing/fake-sbx` (usage in its header); the same works for
 `scripts/goversbx` (`SBX=... GOVERSBX_STATE_DIR=<tmp>`). Keep the host scripts bash
@@ -230,6 +233,17 @@ registered through.
   `McpEndpointIntegrationTest` for the pattern, including how to exercise "a human approves while
   the tool call is blocked" by calling `NetworkAccessService` directly from a background thread in
   the same JVM.
+- E2e suite (`daemon/src/e2eTest`, task `e2eTest`, not in `check`): black-box like `binaryTest`
+  (no daemon classes on its classpath), but against a REAL `sbx` and the real jar in real mode. One
+  shared fixture (`E2eEnvironment`, built once, closed once by `E2eSuite` via the root store): a
+  restartable daemon with the sandbox listener on `0.0.0.0` and `GOVERSBX_IDENTITY_SANDBOX_PATTERN`
+  limited to the run's prefix, plus sandboxes `<prefix>-a` (with workspace) and `<prefix>-b` (without),
+  both created *before* the first registration so a collision between them would show. Classes and
+  methods run in `@Order` (`junit-platform.properties`); the agent side always runs INSIDE a sandbox
+  via `sbx exec` (`Sandbox.callTool`: curl + the placeholder header, through the proxy) - never from
+  the test JVM, which would bypass the proxy and the whole point. Real agents (`claude -p`) are
+  `@Tag("agent")` and skipped unless `GOVERSBX_E2E_AGENTS` names them. Don't read `SANDBOX_NAME` in
+  it: inside a dev sandbox that is the OUTER sandbox's name.
 - The `javalin-testtools` artifact version must track the `javalin` version exactly
   (`gradle/libs.versions.toml`) - they're versioned in lockstep by upstream.
 - **Javalin 7 specifics** (migrated from 6 in 2026-10): routes are registered on `config.routes`
