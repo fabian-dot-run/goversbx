@@ -88,7 +88,10 @@ why). Internally it is split into bounded contexts under `daemon/src/main/java/r
 - **`sandboxidentity`** - registers a sandbox's proxy-verified identity secret, reactively
   (`sbx secret set-custom` + `sbx ls`, see "Sandbox identity" below). No domain - it's a thin
   `application` (+ `port`) → `adapter` wrapper around two `sbx` CLI calls, same shape as
-  `networkaccess`'s `sbx` adapter. Publishes `sandboxidentity.api.SandboxIdentityApi`, because
+  `networkaccess`'s `sbx` adapter, plus a `SandboxRegistrationStore` port whose
+  `adapter.persistence.FileSandboxRegistrationStore` keeps registrations across daemon restarts
+  (`~/.local/state/goversbx/sandbox-registrations.json`, see "Sandbox identity" below). Publishes
+  `sandboxidentity.api.SandboxIdentityApi`, because
   `mcp` *does* call into this context now (to trigger registration when it sees an unregistered
   sandbox) - same cross-context rule as `networkaccess.api`.
 
@@ -121,7 +124,8 @@ those ports (`adapter.persistence`, `adapter.sbx`) and hosts the driving HTTP ad
   `scripts/diagnose-admin-reachability.sh`). So the admin API is **token-gated**
   (`admin.AdminTokenFilter`, wired first in `Main`): every `/api/*` call except `/api/health` needs
   the token (`Authorization: Bearer` or `?token=`); static files and health stay public. The token
-  lives in `admin.DaemonConfig` (file `~/.local/state/goversbx/admin-token`, or `GOVERSBX_ADMIN_TOKEN`),
+  lives in `admin.DaemonConfig` (file `~/.local/state/goversbx/admin-token`, or `GOVERSBX_ADMIN_TOKEN`;
+  the same state dir holds `sandbox-registrations.json`, see "Sandbox identity"),
   reaches the browser via `goversbx dashboard`, and a sandbox never has it. A new admin endpoint must
   stay under `/api/*` so it's covered; don't add public admin endpoints. `RequestNetworkAccessTool`
   additionally refuses a request that targets the daemon's own admin port or a `*` wildcard
@@ -173,10 +177,21 @@ placeholder; the proxy substitutes it to that sandbox's own token.
   a stale token (daemon restarted - the token in sbx outlives the in-memory map), or a forged value.
   `RequestNetworkAccessTool` checks this before doing anything else; if empty, it calls
   `registerAnyUnregisteredSandboxes()` (which runs `sbx ls` and registers every running sandbox this
-  daemon process doesn't already know about - not just the one that triggered it) and tells the agent
-  to retry, without creating a `NetworkAccessRequest`. This is also the **self-heal across a daemon
-  restart**, so no persistence is needed: the stale token doesn't resolve, one re-registration mints
-  a fresh one and overwrites the sbx secret live, and the next retry works.
+  daemon doesn't already know about - not just the one that triggered it) and tells the agent
+  to retry, without creating a `NetworkAccessRequest`.
+- **Registrations are durable** (`SandboxRegistrationStore` port, `FileSandboxRegistrationStore`
+  adapter): the registered incarnations (`name@id`) and the token -> name map are saved to
+  `~/.local/state/goversbx/sandbox-registrations.json` (`GOVERSBX_STATE_DIR`, owner-only, atomic
+  rename) after every successful registration and loaded at startup, so a restarted daemon resolves a
+  registered sandbox's token on its very first call. Losing registrations on restart is **not
+  acceptable** (the user's call): the secret in sbx outlives the daemon, and before this every
+  restart cost each sandbox a "please retry" plus one `sbx ls` + `set-custom`, and an agent that had
+  used up its retries gave up. Don't go back to in-memory-only. The reactive re-registration remains
+  the fallback for a lost/corrupt file: the stale token doesn't resolve, one re-registration mints a
+  fresh token and overwrites the sbx secret live, and the next retry works (contract-tested both
+  ways in `SandboxIdentityTest`). The file is written through Jackson's tree model on purpose - no
+  reflection on daemon types, so it needs no extra native-image metadata. `DaemonProcess` gives every
+  test daemon its own `GOVERSBX_STATE_DIR`; a restart test passes the same one to two daemons.
 - `GOVERSBX_SBX_LS_FORMAT_ARGS` (default `--format json`) exists because `sbx ls`'s JSON flag
   spelling changed across `sbx` versions (`--json` before v0.48.0) - don't hardcode one spelling if
   you touch `SbxCliSandboxListAdapter`.

@@ -145,6 +145,13 @@ daemon generates a token at startup, stores it in `~/.local/state/goversbx/admin
 dashboard` reads the token and opens an authenticated URL, so you normally never see it; opening
 `127.0.0.1:8788` by hand shows a "not authenticated" notice.
 
+Sandbox registrations (which sandboxes already carry an identity secret, and the tokens behind
+them) are kept in `~/.local/state/goversbx/sandbox-registrations.json` (`GOVERSBX_STATE_DIR`
+moves the whole state dir), so a daemon restart - upgrade, `goversbx stop && start`, reboot - does
+not cost every sandbox a "please retry" round trip; a registered sandbox's first call after the
+restart just works. The file holds secrets and is owner-only; delete it and the daemon falls back to
+registering each sandbox again on its next call.
+
 By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals and sandbox-identity registration log what
 they *would* run without calling `sbx`. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't
 on `PATH`) to apply real changes.

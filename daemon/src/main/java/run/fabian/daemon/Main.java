@@ -13,6 +13,7 @@ import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
+import run.fabian.daemon.sandboxidentity.adapter.persistence.FileSandboxRegistrationStore;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliSandboxListAdapter;
 import run.fabian.daemon.sandboxidentity.adapter.web.SandboxIdentityController;
@@ -53,11 +54,16 @@ public final class Main {
 
         SbxCustomSecretPort sbxCustomSecretPort = new SbxCliCustomSecretAdapter(sbxBinary, dryRun);
         SbxSandboxListPort sbxSandboxListPort = new SbxCliSandboxListAdapter(sbxBinary, lsFormatArgs);
-        SandboxIdentityService sandboxIdentityService = new SandboxIdentityService(
-                sbxCustomSecretPort, sbxSandboxListPort, identityTargetHost, identityEnvVar, identityPlaceholder,
-                identitySandboxPattern);
-
         DaemonConfig config = DaemonConfig.load();
+
+        // Registrations outlive the daemon: the secrets they describe live in sbx, so a restart must
+        // not forget them (a sandbox would otherwise get "please retry" on its first call after one).
+        FileSandboxRegistrationStore registrationStore =
+                new FileSandboxRegistrationStore(DaemonConfig.sandboxRegistrationsFile());
+        SandboxIdentityService sandboxIdentityService = new SandboxIdentityService(
+                sbxCustomSecretPort, sbxSandboxListPort, registrationStore,
+                identityTargetHost, identityEnvVar, identityPlaceholder, identitySandboxPattern);
+        log.info("Sandbox registrations are kept in {}", registrationStore.file());
 
         McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService, adminPort);
 

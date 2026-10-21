@@ -1,22 +1,48 @@
 package run.fabian.daemon.sandboxidentity.application;
 
 import org.junit.jupiter.api.Test;
+import run.fabian.daemon.sandboxidentity.application.port.SandboxRegistrationStore;
+import run.fabian.daemon.sandboxidentity.application.port.SandboxRegistrationStore.RegistrationState;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SandboxIdentityServiceTest {
 
     private record Call(String sandboxName, String targetHost, String envVarName, String placeholder, String value) {
+    }
+
+    /** The simplest durable store: what the last save said. Stands in for the file in the state dir. */
+    private static final class MemoryStore implements SandboxRegistrationStore {
+        RegistrationState saved = RegistrationState.empty();
+        int saves;
+
+        @Override
+        public RegistrationState load() {
+            return saved;
+        }
+
+        @Override
+        public void save(RegistrationState state) {
+            saved = state;
+            saves++;
+        }
+    }
+
+    private static SandboxIdentityService withStore(SbxCustomSecretPort port, SbxSandboxListPort listing, MemoryStore store) {
+        return new SandboxIdentityService(port, listing, store, "localhost", "VAR", "placeholder", java.util.regex.Pattern.compile(".*"));
     }
 
     private static SbxSandboxListPort listing(String... names) {
@@ -179,5 +205,92 @@ class SandboxIdentityServiceTest {
         service.registerAnyUnregisteredSandboxes();
 
         assertEquals(2, calls.size());
+    }
+
+    @Test
+    void registrationsSurviveARestartThroughTheStore() {
+        List<Call> calls = new CopyOnWriteArrayList<>();
+        SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {
+            calls.add(new Call(sandboxName, targetHost, envVarName, placeholder, value));
+            return new SbxCustomSecretPort.Result(true, "ok");
+        };
+        MemoryStore store = new MemoryStore();
+
+        SandboxIdentityService firstRun = withStore(port, listing("durable"), store);
+        firstRun.registerAnyUnregisteredSandboxes();
+        String token = calls.get(0).value();
+        assertEquals(Set.of("durable@id-of-durable"), store.saved.registeredIncarnations());
+        assertEquals(Map.of(token, "durable"), store.saved.tokenToName());
+
+        // "Daemon restart": a new service instance over the same store, nothing else carried over.
+        SandboxIdentityService secondRun = withStore(port, listing("durable"), store);
+
+        // The token the proxy still substitutes resolves right away - no "please retry" ...
+        assertEquals(Optional.of("durable"), secondRun.resolveSandboxName(token));
+        // ... and the incarnation counts as registered, so no second set-custom is issued.
+        secondRun.registerAnyUnregisteredSandboxes();
+        assertEquals(1, calls.size(), calls.toString());
+    }
+
+    @Test
+    void aRecreatedSandboxIsRegisteredAgainAfterARestartAndTheOldTokenStillOnlyMapsToItsName() {
+        List<Call> calls = new CopyOnWriteArrayList<>();
+        SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {
+            calls.add(new Call(sandboxName, targetHost, envVarName, placeholder, value));
+            return new SbxCustomSecretPort.Result(true, "ok");
+        };
+        MemoryStore store = new MemoryStore();
+        withStore(port, () -> List.of(new RunningSandbox("sb", "first-id")), store).registerAnyUnregisteredSandboxes();
+
+        SandboxIdentityService restarted = withStore(port, () -> List.of(new RunningSandbox("sb", "second-id")), store);
+        restarted.registerAnyUnregisteredSandboxes();
+
+        assertEquals(List.of("sb", "sb"), calls.stream().map(Call::sandboxName).toList());
+        assertEquals(Set.of("sb@first-id", "sb@second-id"), store.saved.registeredIncarnations());
+        assertEquals(Optional.of("sb"), restarted.resolveSandboxName(calls.get(0).value()));
+        assertEquals(Optional.of("sb"), restarted.resolveSandboxName(calls.get(1).value()));
+    }
+
+    @Test
+    void explicitRegistrationIsPersistedToo() {
+        SbxCustomSecretPort port = (n, t, e, p, value) -> new SbxCustomSecretPort.Result(true, "ok");
+        MemoryStore store = new MemoryStore();
+
+        withStore(port, listing(), store).register("pre-warmed");
+
+        assertEquals(1, store.saves);
+        assertEquals(List.of("pre-warmed"), List.copyOf(store.saved.tokenToName().values()));
+        assertTrue(store.saved.registeredIncarnations().isEmpty());   // the admin path knows no incarnation id
+    }
+
+    @Test
+    void aFailedRegistrationIsNotPersisted() {
+        SbxCustomSecretPort port = (n, t, e, p, value) -> new SbxCustomSecretPort.Result(false, "sbx down");
+        MemoryStore store = new MemoryStore();
+
+        SandboxIdentityService service = withStore(port, listing("sandbox-a"), store);
+        service.registerAnyUnregisteredSandboxes();
+        service.register("by-hand");
+
+        assertEquals(0, store.saves);
+        assertEquals(RegistrationState.empty(), store.saved);
+    }
+
+    @Test
+    void aLostStoreFallsBackToReRegistration() {
+        List<Call> calls = new CopyOnWriteArrayList<>();
+        SbxCustomSecretPort port = (sandboxName, targetHost, envVarName, placeholder, value) -> {
+            calls.add(new Call(sandboxName, targetHost, envVarName, placeholder, value));
+            return new SbxCustomSecretPort.Result(true, "ok");
+        };
+        withStore(port, listing("sb"), new MemoryStore()).registerAnyUnregisteredSandboxes();
+        String staleToken = calls.get(0).value();
+
+        // The state file is gone: the stale token doesn't resolve, one re-registration self-heals it.
+        SandboxIdentityService restarted = withStore(port, listing("sb"), new MemoryStore());
+        assertFalse(restarted.resolveSandboxName(staleToken).isPresent());
+        restarted.registerAnyUnregisteredSandboxes();
+        assertEquals(2, calls.size());
+        assertEquals(Optional.of("sb"), restarted.resolveSandboxName(calls.get(1).value()));
     }
 }

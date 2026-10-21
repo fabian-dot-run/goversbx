@@ -1,7 +1,38 @@
 # Implementation status
 
-Snapshot as of 2026-10-14. This is the place to resume from. `docs/plan.md` has the full history
+Snapshot as of 2026-10-15. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
+
+## Durable sandbox registrations (2026-10-15, 0.2.8, not yet released)
+
+The user's requirement: losing sandbox registrations on a daemon restart is not acceptable. Before,
+the token -> name map and the "already registered" set were in-memory only; every restart (upgrade,
+`goversbx stop && start`, reboot) made each sandbox's next call fail with "please retry", cost one
+`sbx ls` + `sbx secret set-custom` per sandbox, and an agent that had already used its ~3 retries
+gave up. (The 2026-10-14 dogfooding note below claiming "no please-retry after a restart is
+expected" was wrong - the secret in sbx survived, the daemon's knowledge of it did not.)
+
+- New driven port `sandboxidentity.application.port.SandboxRegistrationStore` (`load`/`save` of a
+  `RegistrationState`: `name@id` incarnations + token -> name) and adapter
+  `adapter.persistence.FileSandboxRegistrationStore`: one versioned JSON file,
+  `~/.local/state/goversbx/sandbox-registrations.json` (`GOVERSBX_STATE_DIR`, next to
+  `admin-token`), owner-only permissions, temp-file + atomic rename, Jackson tree model (no
+  reflection on our types, so no new native-image metadata). Unreadable/malformed/other-version
+  file -> logged, treated as empty, replaced by the next save.
+- `SandboxIdentityService` loads the state in its constructor and saves after every successful
+  registration (reactive and admin-endpoint); failed registrations are not saved. `Main` wires the
+  file store and logs its path; the convenience constructors (tests) use a no-op store.
+- Verified: unit tests for the store (round trip, permissions, missing/corrupt/foreign file, bad
+  entries, unwritable path) and the service (restart via a shared store resolves the old token with
+  no second `set-custom`; a recreated sandbox is registered again after a restart; explicit
+  registration persisted; failure not persisted; lost store falls back to re-registration), and two
+  black-box contract tests that stop and restart the real daemon process on the same state dir:
+  the restarted daemon logs "Restored 1 sandbox registration(s)", answers the old token's call with
+  a pending request under the right sandbox name with zero sbx calls, and a deleted state file
+  self-heals via one re-registration. `./gradlew check` (58 unit + 63 contract tests) green.
+  `binaryTestNative` could not run in this sandbox (no GraalVM) - the release workflow runs it.
+- **Next**: release v0.2.8; restart the host daemon and confirm a registered sandbox's first call
+  after the restart creates a request straight away (no "please retry" in the daemon log).
 
 ## Native binary contract tests + enforced metadata (2026-10-14, not yet released)
 
@@ -173,8 +204,9 @@ arrived as a real Firefox notification and was approved from it. Findings:
   rule (probably from a declined sbx approval during earlier diagnostics) wins over goversbx's
   allow, yet the daemon reported "Approved". Possible follow-up: detect conflicting deny rules after
   `sbx policy allow` and report them instead of plain "Approved".
-- No "please retry" on the first call after a daemon restart is expected: the sandbox-scoped
-  identity secret lives in sbx and survives the daemon.
+- ~~No "please retry" on the first call after a daemon restart is expected: the sandbox-scoped
+  identity secret lives in sbx and survives the daemon.~~ Wrong - the daemon's token map didn't
+  survive, so every restart did cost a retry. Fixed on 2026-10-15 (durable registrations, see top).
 
 **Next steps**: restart the daemon (`scripts/goversbx stop && scripts/goversbx start`), then rerun
 `scripts/e2e-claude.sh` on the host (unprompted goversbx use); pi/oh-my-pi end to end (their
@@ -586,13 +618,14 @@ becomes reachable from that sandbox.
 2. ~~Installing the kit into new sandboxes.~~ **Resolved:** v2 mixin kits (`sandbox-kit/kits/`,
    `sbx create|run --kit <dir|git|zip>` or `sbx kit add`), verified for Claude on the host. Known gap from the kit docs: `sbx kit add` of a mixin doesn't write its
    agent instructions (kits-memory) - harmless here, the skill carries the same guidance.
-3. **Daemon state is in-memory** - pending requests and the "already registered" set are lost on
-   restart (registration is idempotent, so only one extra retry per sandbox).
+3. **Pending requests are in-memory** and lost on restart (an agent then gets "unknown requestId"
+   from `check_network_access_status` and should ask again). Sandbox registrations are durable since
+   2026-10-15 (`sandbox-registrations.json`).
 
 ## Backlog (after the Claude MVP works)
 
 - Find where mixin agent instructions land; optionally a launchd agent so the daemon starts at login.
 - Run `scripts/e2e-pi.sh`, `scripts/e2e-omp.sh`, `scripts/e2e-opencode.sh` for real against a real
   sbx host (see "pi, oh-my-pi, opencode" section above - mechanics-only so far).
-- Out of MVP scope so far: revocation/expiry of approvals, persistence, authn on the admin UI
-  (currently only protected by loopback binding), audit log, deny reason back to the agent.
+- Out of MVP scope so far: revocation/expiry of approvals, persistence of pending requests (sandbox
+  registrations are persisted; the admin UI is token-gated), audit log, deny reason back to the agent.

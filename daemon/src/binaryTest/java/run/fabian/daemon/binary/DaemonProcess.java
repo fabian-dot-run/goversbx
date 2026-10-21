@@ -75,6 +75,9 @@ final class DaemonProcess implements AutoCloseable {
             env.put("GOVERSBX_ADMIN_TOKEN", ADMIN_TOKEN);
             env.put("GOVERSBX_AUTO_OPEN_DASHBOARD", "false");            // tests opt in explicitly
             env.put("XDG_CONFIG_HOME", Files.createTempDirectory("goversbx-config").toString());
+            // Fresh state dir per daemon (sandbox-registrations.json lives there), unless a test shares one
+            // across two daemons on purpose to check what survives a restart.
+            env.put("GOVERSBX_STATE_DIR", Files.createTempDirectory("goversbx-state").toString());
             env.putAll(envOverrides);
             long started = System.nanoTime();
             Process process = builder.start();

@@ -151,16 +151,20 @@ reading the admin UI carefully reduce blast radius but do not stop forgery.
  A forger who sends a guessed name, another sandbox's name, or the placeholder can only ever
  resolve to its own sandbox or be rejected - it cannot produce a victim's secret token.
 
-*No persistence needed across a daemon restart.* The token lives in sbx (survives the daemon) and
-in the daemon's in-memory map (does not). After a restart the map is empty, so a registered
-sandbox's placeholder is substituted to a token the daemon no longer knows → `resolveSandboxName`
-returns empty → one re-registration mints a fresh token, overwrites the stale sbx secret live, and
-the next retry resolves. This is the same single "please retry" round trip a brand-new sandbox
-already does, so it fits the deliberate in-memory-only design; a disk-backed token map would only
-save that one retry and can be added later if wanted. The open residue is a slow unbounded growth of
-the token map (old tokens are never evicted, each still maps only to its own sandbox) and that an
-unresolvable value makes the daemon run `sbx ls` once - both tracked under T2 (denial of service),
-not T1.
+*Registrations persist across a daemon restart* (since 0.2.8). The token lives in sbx (survives
+the daemon) and in the daemon's token map, which is now saved to
+`~/.local/state/goversbx/sandbox-registrations.json` after every successful registration and
+loaded at startup, so a registered sandbox's substituted token resolves on its first call after a
+restart. The file holds the identity tokens, i.e. the secrets a sandbox must never learn: it is
+created owner-read/write only and written by atomic rename, next to the admin token, and sits
+inside the host user's state dir - the same trust level as `admin-token` and the host's own `sbx`
+credentials (a host-user compromise already has `sbx secret` itself). It is never reachable from a
+sandbox (not served by any endpoint). If the file is lost or unreadable, the pre-0.2.8 behaviour
+still applies as a fallback: the stale token doesn't resolve → one re-registration mints a fresh
+token, overwrites the stale sbx secret live, and the next retry resolves. The open residue is a slow
+unbounded growth of the token map (old tokens are never evicted, each still maps only to its own
+sandbox - now on disk as well) and that an unresolvable value makes the daemon run `sbx ls` once -
+both tracked under T2 (denial of service), not T1.
 
 *Tests.* `SandboxIdentityServiceTest` asserts the value is a token, not the name, and that only a
 minted token resolves (a bare name or the placeholder does not). The black-box contract suite

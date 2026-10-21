@@ -744,3 +744,29 @@ integration, and the black-box contract suite). The native-image path (Jetty 12 
 `binaryTestNative` in the release workflow - if a native-only metadata gap appears, it fails there
 before anything is published. API facts were taken from `javap` against the real 7.2.3 jars, per the
 project convention.
+
+## Revision (2026-10-15): sandbox registrations persist across daemon restarts
+
+Reverses the "no persistence needed" decision of the F1 revision above (kept verbatim there as the
+record). The argument was that a restart only costs the same single "please retry" a new sandbox
+does. In use that is not acceptable: the daemon restarts on every upgrade and `goversbx stop && start`,
+and each restart made every sandbox's next call fail once, cost an `sbx ls` + `sbx secret set-custom`
+per sandbox, and an agent that had used up its retries gave up on goversbx altogether. The secret in
+sbx is durable, so the daemon's knowledge of it has to be too.
+
+- `sandboxidentity` gets a third driven port, `SandboxRegistrationStore` (`load()`/`save(state)` of
+  the `name@id` incarnations and the token -> name map), and `adapter.persistence
+  .FileSandboxRegistrationStore`: a versioned JSON file in the state dir
+  (`~/.local/state/goversbx/sandbox-registrations.json`, `GOVERSBX_STATE_DIR`), owner-only like
+  `admin-token` because it holds the identity tokens, written via temp file + atomic rename, read and
+  written through Jackson's tree model so the native image needs no reflection metadata for it.
+- `SandboxIdentityService` loads the saved state in its constructor and saves after each successful
+  registration. The reactive re-registration path is unchanged and is now the fallback for a lost or
+  unreadable file (logged, treated as empty, overwritten by the next save).
+- Pending `NetworkAccessRequest`s stay in-memory for now - the durable state that matters there is
+  the sbx policy, and a lost pending request only costs the agent a new request.
+- Tests: store unit tests, service round-trip tests over an in-memory store, and two contract tests
+  in `SandboxIdentityTest` that stop and restart the daemon process on a shared `GOVERSBX_STATE_DIR`
+  (`DaemonProcess` now gives every daemon its own state dir by default). Verified with `./gradlew
+  check` on the JVM; `binaryTestNative` is gated in the release workflow.
+

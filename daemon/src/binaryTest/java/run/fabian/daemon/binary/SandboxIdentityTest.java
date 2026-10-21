@@ -2,13 +2,18 @@ package run.fabian.daemon.binary;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Reactive registration: spawning sbx, parsing `sbx ls` JSON, and surviving a misbehaving sbx. */
+/** Reactive registration: spawning sbx, parsing `sbx ls` JSON, surviving a misbehaving sbx, surviving a restart. */
 class SandboxIdentityTest {
 
     private static String placeholderCall(DaemonProcess daemon) {
@@ -90,6 +95,64 @@ class SandboxIdentityTest {
         try (DaemonProcess daemon = DaemonProcess.start(sbx, DaemonProcess.env("GOVERSBX_SBX_BINARY", "/nonexistent/sbx"))) {
             assertTrue(placeholderCall(daemon).contains("registering it now"));
             assertTrue(daemon.isAlive());
+        }
+    }
+
+    private static long secretCalls(FakeSbx sbx) {
+        return sbx.calls().stream().filter(c -> c.startsWith("secret")).count();
+    }
+
+    @Test
+    void registrationSurvivesADaemonRestart() throws IOException {
+        FakeSbx sbx = FakeSbx.create().running("durable-1");
+        Path stateDir = Files.createTempDirectory("goversbx-state-shared");
+        Map<String, String> sameStateDir = DaemonProcess.env("GOVERSBX_STATE_DIR", stateDir.toString());
+
+        String token;
+        try (DaemonProcess daemon = DaemonProcess.start(sbx, sameStateDir)) {
+            assertTrue(placeholderCall(daemon).contains("registering it now"));
+            token = sbx.tokenFor("durable-1");
+            assertNotNull(token, sbx.calls().toString());
+            assertTrue(Files.exists(stateDir.resolve("sandbox-registrations.json")), "state file written");
+        }
+        assertEquals(1, secretCalls(sbx), sbx.calls().toString());
+
+        try (DaemonProcess restarted = DaemonProcess.start(sbx, sameStateDir)) {
+            assertTrue(restarted.log().contains("Restored 1 sandbox registration(s)"), restarted.log());
+            // The sbx proxy still substitutes the token minted before the restart; the restarted
+            // daemon must resolve it on the first call - no "please retry", no sbx call at all.
+            String answer = Mcp.text(restarted.mcp(token).initialize()
+                    .callTool("request_network_access", Mcp.args("host", "durable.example", "reason", "r", "timeoutSeconds", 1)));
+            assertTrue(answer.startsWith("Still pending"), answer);
+            assertEquals("durable-1", restarted.awaitPending("durable.example").path("sandboxName").asText());
+            // And the incarnation is still known: another unregistered caller triggers a pass that
+            // registers nothing for durable-1 again.
+            assertTrue(placeholderCall(restarted).contains("registering it now"));
+        }
+        assertEquals(1, secretCalls(sbx), sbx.calls().toString());
+    }
+
+    @Test
+    void aMissingStateFileFallsBackToReRegistration() throws IOException {
+        FakeSbx sbx = FakeSbx.create().running("heal-1");
+        Path stateDir = Files.createTempDirectory("goversbx-state-lost");
+        Map<String, String> sameStateDir = DaemonProcess.env("GOVERSBX_STATE_DIR", stateDir.toString());
+
+        String staleToken;
+        try (DaemonProcess daemon = DaemonProcess.start(sbx, sameStateDir)) {
+            placeholderCall(daemon);
+            staleToken = sbx.tokenFor("heal-1");
+        }
+        Files.delete(stateDir.resolve("sandbox-registrations.json"));
+
+        try (DaemonProcess restarted = DaemonProcess.start(sbx, sameStateDir)) {
+            Mcp stale = restarted.mcp(staleToken).initialize();
+            assertTrue(Mcp.text(stale.callTool("request_network_access",
+                    Mcp.args("host", "heal.example", "reason", "r", "timeoutSeconds", 1))).contains("registering it now"));
+            assertEquals(2, secretCalls(sbx), sbx.calls().toString());
+            // What the proxy substitutes from now on is the fresh token, and that one works.
+            assertTrue(Mcp.text(restarted.mcp(sbx.tokenFor("heal-1")).initialize().callTool("request_network_access",
+                    Mcp.args("host", "heal.example", "reason", "r", "timeoutSeconds", 1))).startsWith("Still pending"));
         }
     }
 }

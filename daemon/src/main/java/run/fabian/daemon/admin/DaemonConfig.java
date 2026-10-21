@@ -108,6 +108,14 @@ public final class DaemonConfig {
         return stateDir().resolve("admin-token");
     }
 
+    /**
+     * Where sandbox registrations (incarnations + identity tokens) are kept across restarts; holds
+     * secrets, so it sits next to the admin token in the state dir and gets the same permissions.
+     */
+    public static Path sandboxRegistrationsFile() {
+        return stateDir().resolve("sandbox-registrations.json");
+    }
+
     private static Path stateDir() {
         String stateDir = env("GOVERSBX_STATE_DIR");
         if (stateDir != null) {
