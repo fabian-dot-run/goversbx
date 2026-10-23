@@ -1,7 +1,6 @@
 package run.fabian.daemon.sandboxidentity.adapter.sbx;
 
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
-import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +16,8 @@ import java.util.stream.Collectors;
  * Read-only - no dry-run mode needed, unlike the mutating {@code sbx} adapters in this package.
  * {@code sbx ls}'s JSON flag spelling changed across versions ({@code --json} pre-0.48.0,
  * {@code --format json} from 0.48.0 on); {@code lsFormatArgs} is configurable
- * (`GOVERSBX_SBX_LS_FORMAT_ARGS`) rather than hardcoded for exactly that reason.
+ * (`GOVERSBX_SBX_LS_FORMAT_ARGS`) rather than hardcoded for exactly that reason. Only stdout is
+ * parsed: sbx prints warnings on stderr (seen: "docker hub refresh lock held by another process").
  */
 public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
 
@@ -33,7 +33,7 @@ public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
     }
 
     @Override
-    public List<RunningSandbox> listRunningSandboxes() {
+    public List<ListedSandbox> listSandboxes() {
         List<String> command = new java.util.ArrayList<>();
         command.add(sbxBinary);
         command.add("ls");
@@ -51,20 +51,19 @@ public final class SbxCliSandboxListAdapter implements SbxSandboxListPort {
                 log.warn("sbx ls failed (exit {}): {}", exitCode, output);
                 return List.of();
             }
-            List<RunningSandbox> running = parseRunningSandboxes(output, mapper);
-            log.info("sbx ls: running sandboxes {}", running.stream().map(RunningSandbox::name).toList());
-            return running;
+            List<ListedSandbox> sandboxes = parseSandboxes(output, mapper);
+            log.info("sbx ls: running sandboxes {}", sandboxes.stream().filter(ListedSandbox::running).map(ListedSandbox::name).toList());
+            return sandboxes;
         } catch (Exception e) {
             log.error("Failed to invoke sbx ls", e);
             return List.of();
         }
     }
 
-    static List<RunningSandbox> parseRunningSandboxes(String json, ObjectMapper mapper) throws Exception {
+    static List<ListedSandbox> parseSandboxes(String json, ObjectMapper mapper) throws Exception {
         SandboxSummary[] sandboxes = mapper.readValue(json, SandboxSummary[].class);
         return Arrays.stream(sandboxes)
-                .filter(s -> "running".equals(s.status()))
-                .map(s -> new RunningSandbox(s.name(), s.id()))
+                .map(s -> new ListedSandbox(s.name(), s.id(), "running".equals(s.status()), s.workspaces()))
                 .toList();
     }
 }

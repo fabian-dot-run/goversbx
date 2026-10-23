@@ -1,6 +1,37 @@
 # Slice 1: batch request from the project file
 
-Status: draft (2026-10-23). Epic: `epic.md`.
+Status: implementing (2026-10-23; decisions below taken by the user, code and contract tests in
+place, the e2e run on a real sbx is pending). Epic: `epic.md`.
+
+## Decisions (2026-10-23)
+
+1. **Unified request entity.** `NetworkAccessRequest` carries one or more hosts, an origin
+   (`AGENT` / `PROJECT_FILE`), the source file and profile names, and per-host outcomes
+   (`HostGrant`). An agent request is a set of one. One approval flow, one repository, one view with
+   `hosts`; `host` stays set for single requests and is `null` for a set.
+2. **sbx idempotency** (`sbx policy allow` for an existing rule): verified by
+   `SbxCliContractTest.policyAllowNetworkTwiceForTheSameHostSucceedsBothTimes` in the e2e suite.
+3. **Comma-separated list with `--sandbox`**: verified by reachability in
+   `ProjectHostSetTest.aCommaSeparatedHostListIsAcceptedBySbxPolicyAllowWithSandbox` (e2e). The daemon
+   applies per host until that run is green; then the batch form is an adapter-only change
+   (`SbxPolicyPort.allowNetwork(sandbox, hosts)` is the seam) and this spec is updated.
+4. **Profiles only in the config dir** (`$XDG_CONFIG_HOME/goversbx/profiles/`, default
+   `~/.config/goversbx/profiles/`); no `profilesDir` setting.
+
+Amendments while implementing:
+
+- T1 includes `POST /api/sandboxes/{name}/register` only when `sbx ls` lists the sandbox: the
+  endpoint now looks the name up, and records and announces the incarnation if it is new. A
+  pre-warmed name sbx doesn't list is registered without an announcement (no workspaces to read).
+- T2 answers `404` both for a name the daemon never registered and for one sbx no longer lists.
+  Its response lists one evaluation per workspace (`CREATED`, `ALREADY_PENDING`, `ALL_GRANTED`,
+  `NO_FILE`, `INVALID` with the problems).
+- The F3 admin-port guard moved from the MCP tool into `networkaccess` (`LocalTargetGuard`,
+  applied by the service on every path), so a project file cannot name the daemon's own admin port
+  either.
+- Scenario 14: the contract suite pins the API and SSE shape of a set (every host, origin, source,
+  profiles); the rendering itself (list in full, distinct styling, "Approve all") is checked by
+  hand in the dashboard, since the suite has no browser.
 
 ## Scope
 
@@ -165,11 +196,7 @@ count. Auto-open applies as for singles.
   the tree model (no reflection on our types, same reasoning as the registration store). New
   routes and JSON shapes need contract tests, or the native binary will lack their metadata.
 
-## Open questions (settle before `accepted`)
+## Open questions
 
-1. Unified request entity (design note above) or a separate host-set entity?
-2. Is `sbx policy allow network` idempotent for an existing rule? Determines whether the restart
-   re-request (scenario 16) is merely redundant or noisy. Verify in `SbxCliContractTest`.
-3. Does the comma-separated host list work with `--sandbox`? If yes, a later optimization; the
-   spec's per-host sequential call stays the contract until then.
-4. `$XDG_CONFIG_HOME/goversbx/profiles/` only, or also a `profilesDir` in `config.properties`?
+Settled, see "Decisions" above. Questions 2 and 3 have their verifying tests in the e2e suite and
+are answered by its first green run on a real sbx.

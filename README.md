@@ -185,6 +185,45 @@ By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals and sandbox-identity regist
 they *would* run without calling `sbx`. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't
 on `PATH`) to apply real changes.
 
+### Project host sets
+
+A project can declare the hosts every new sandbox of it needs, so they are unlocked with one
+decision instead of one request per host (spec: `docs/specs/0001-project-host-set/`):
+
+```yaml
+# <workspace>/.goversbx/network.yaml
+version: 1
+profiles:            # optional: user-supplied profiles from ~/.config/goversbx/profiles/<name>.yaml
+  - jvm-build
+hosts:               # optional: the project's own hosts
+  - repo.maven.apache.org
+  - plugins.gradle.org
+```
+
+```yaml
+# ~/.config/goversbx/profiles/jvm-build.yaml   ($XDG_CONFIG_HOME honored)
+version: 1
+hosts:
+  - services.gradle.org
+  - plugins-artifacts.gradle.org
+```
+
+When the daemon registers a new sandbox (its first call, or `POST /api/sandboxes/{name}/register`)
+it reads the file from every workspace `sbx ls` reports for it and raises **one host-set request**
+in the dashboard: profile hosts first, then the file's hosts, each once, hosts already granted to
+the sandbox left out. The human approves or denies the set as a whole, every time - the file is
+writable from inside the sandbox, so it never grants anything by itself. On approval the daemon runs
+`sbx policy allow network <host> --sandbox <name>` per host and shows each host's outcome; pending
+single requests of that sandbox for hosts in the set are answered by the same decision, and a later
+`request_network_access` for a host already granted to the sandbox is approved at once.
+
+The file is strict: `version: 1`, only `profiles`/`hosts`, plain hostnames (the same rule as the
+tool: no wildcards, URLs or IPs), at most 100 hosts, no symlinks. An invalid file raises nothing and
+is explained in the daemon log (and in the admin endpoint's response); the agent never sees it.
+`POST /api/sandboxes/{name}/host-set-requests` (admin token) evaluates the file again for a registered
+sandbox: `201` created, `200` already pending / nothing left, `400` invalid file, `404` unknown
+sandbox. goversbx ships no host lists on purpose - profiles are yours.
+
 ### Configuration file
 
 On first start the daemon writes a commented config file to `~/.config/goversbx/config.properties`

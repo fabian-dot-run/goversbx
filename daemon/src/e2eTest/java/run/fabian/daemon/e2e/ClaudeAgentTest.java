@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * "ask the user to run sbx policy approval" text instead). Needs Claude credentials inside the
  * sandbox, so it only runs with GOVERSBX_E2E_AGENTS=claude.
  */
-@Order(5)
+@Order(6)
 @Tag("agent")
 @ExtendWith(E2eSuite.class)
 class ClaudeAgentTest {

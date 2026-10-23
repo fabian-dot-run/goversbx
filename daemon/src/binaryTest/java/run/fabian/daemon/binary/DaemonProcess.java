@@ -200,6 +200,36 @@ final class DaemonProcess implements AutoCloseable {
         return matches;
     }
 
+    /** All requests (any status) matching the predicate, newest data. */
+    List<JsonNode> requestsWhere(java.util.function.Predicate<JsonNode> predicate) {
+        List<JsonNode> matches = new java.util.ArrayList<>();
+        adminJson("/api/requests").forEach(r -> {
+            if (predicate.test(r)) {
+                matches.add(r);
+            }
+        });
+        return matches;
+    }
+
+    /** Project host sets (any status) of this sandbox. */
+    List<JsonNode> hostSetsOf(String sandbox) {
+        return requestsWhere(r -> "PROJECT_FILE".equals(r.path("origin").asText()) && sandbox.equals(r.path("sandboxName").asText()));
+    }
+
+    /** Waits until a pending project host set for this sandbox exists and returns it. */
+    JsonNode awaitPendingHostSet(String sandbox) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (System.nanoTime() < deadline) {
+            for (JsonNode r : hostSetsOf(sandbox)) {
+                if ("PENDING".equals(r.path("status").asText())) {
+                    return r;
+                }
+            }
+            sleep(50);
+        }
+        return fail("no pending host set for " + sandbox + " within 20s; log:\n" + log());
+    }
+
     /** Waits until exactly one pending request for this host exists and returns it. */
     JsonNode awaitPending(String host) {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();

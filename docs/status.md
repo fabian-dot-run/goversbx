@@ -3,6 +3,40 @@
 Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Slice 1 of epic 0001 implemented (2026-10-23, not yet released, e2e run pending)
+
+The user settled the spec's open questions (unified request entity; profiles only in the config
+dir; verify sbx idempotency and the comma list, use the comma form right away if it works). Built
+against `docs/specs/0001-project-host-set/slice-1.md`, all its scenarios have tests:
+
+- `networkaccess`: `NetworkAccessRequest` now has `hosts` + `origin` + per-host `HostGrant`s (an
+  agent request is a set of one); the service keeps `grantedHosts` per sandbox name (in memory),
+  `createHostSetRequest` (leaves out granted hosts, one pending set per sandbox+source),
+  `forgetGrants` (new incarnation), approval applies per host via
+  `SbxPolicyPort.allowNetwork(sandbox, hosts)` (the seam for the comma form), an approved set
+  resolves pending singles of that sandbox, a request for a granted host is answered at once
+  (`decidedBy = "goversbx"`, only a `decided` event). F3 guard moved into the domain
+  (`LocalTargetGuard`), applied on every path; the MCP tool lost its own copy.
+- `sandboxidentity`: `sbx ls` rows carry `workspaces` (`ListedSandbox`); every NEW incarnation is
+  announced (`SandboxRegistrationListener`, `RegisteredSandbox`); the admin register endpoint looks
+  the name up and announces it too; `findRegistered(name)` for the explicit trigger.
+- New context `projecthosts`: `YamlHostSetSource` (jackson-dataformat-yaml, tree model, strict,
+  symlink-free, 64 KiB, 100 hosts), `ProjectHostSetService`, admin
+  `POST /api/sandboxes/{name}/host-set-requests` (201/200/400/404).
+- UI: a set is one row with every host listed, "project host set" badge, source + profiles,
+  "Approve all"; notifications only for pending requests; per-host failures shown.
+- Tests: unit (YAML source, service, controller, domain, identity events), contract
+  (`binaryTest/ProjectHostSetTest`, 14 tests incl. restart and SSE; `FakeSbx.failPolicyFor`), e2e
+  (`e2eTest/ProjectHostSetTest` @Order(5): T1 via re-registration, approval -> reachable from `-a`
+  only, explicit trigger, and the comma-list verification on `-b`;
+  `SbxCliContractTest.policyAllowNetworkTwice...` for idempotency; `ClaudeAgentTest` moved to
+  @Order(6); new knob `GOVERSBX_E2E_SET_HOST`, default `example.com`, must be blocked beforehand).
+- **Next**: run `./gradlew :daemon:e2eTest` (nested dev sandbox or host). If the comma-list test is
+  green, switch `SbxCliPolicyAdapter` to one `sbx policy allow network a,b,c --sandbox` call per set
+  and update the spec's decision 3; if the idempotency test fails, treat "already exists" as applied.
+  Then open the dashboard once by hand for scenario 14's rendering, bump the version, release.
+  Slice 2 (launcher trigger) is next in the epic.
+
 ## Spec-driven development; epic 0001 "project host set" (2026-10-23, spec only)
 
 From now on a feature starts as a spec under `docs/specs/` (convention: `docs/specs/README.md`;

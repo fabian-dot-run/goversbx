@@ -160,6 +160,31 @@ final class Daemon implements AutoCloseable {
                 + "\nDaemon log tail:\n" + logTail(40));
     }
 
+    /** Project host sets (any status) of this sandbox. */
+    List<JsonNode> hostSetsOf(String sandbox) {
+        List<JsonNode> matches = new ArrayList<>();
+        requests().forEach(r -> {
+            if ("PROJECT_FILE".equals(r.path("origin").asText()) && sandbox.equals(r.path("sandboxName").asText())) {
+                matches.add(r);
+            }
+        });
+        return matches;
+    }
+
+    JsonNode awaitPendingHostSet(String sandbox, Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            Optional<JsonNode> pending = hostSetsOf(sandbox).stream().filter(r -> "PENDING".equals(r.path("status").asText())).findFirst();
+            if (pending.isPresent()) {
+                System.out.println("    pending host set: " + pending.get());
+                return pending.get();
+            }
+            sleep(500);
+        }
+        return fail("no pending project host set for " + sandbox + " within " + timeout + ". Requests seen: " + requests()
+                + "\nDaemon log tail:\n" + logTail(40));
+    }
+
     /** POST approve/deny; returns the decided request. */
     JsonNode decide(String requestId, String decision) {
         HttpResponse<String> response = postJson("/api/requests/" + requestId + "/" + decision, "{\"decidedBy\":\"e2eTest\"}");

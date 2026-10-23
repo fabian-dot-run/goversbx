@@ -49,13 +49,18 @@ class McpEndpointIntegrationTest {
             public void registerAnyUnregisteredSandboxes() {
                 throw new AssertionError("should not be called when the identity resolves");
             }
+
+            @Override
+            public java.util.Optional<run.fabian.daemon.sandboxidentity.api.RegisteredSandbox> findRegistered(String sandboxName) {
+                return java.util.Optional.empty();
+            }
         };
     }
 
     @Test
     void listsBothTools() {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service, noopSandboxIdentity(), 8788);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connect(client.getOrigin())) {
@@ -70,7 +75,7 @@ class McpEndpointIntegrationTest {
     @Test
     void requestNetworkAccessReturnsPendingWhenNobodyDecides() {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service, noopSandboxIdentity(), 8788);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connect(client.getOrigin())) {
@@ -88,7 +93,7 @@ class McpEndpointIntegrationTest {
     void requestNetworkAccessUnblocksAsSoonAsApproved() throws Exception {
         InMemoryRequestRepository repository = new InMemoryRequestRepository();
         NetworkAccessService service = new NetworkAccessService(repository, new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service, noopSandboxIdentity(), 8788);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         ExecutorService approver = Executors.newSingleThreadExecutor();
         try {
@@ -129,8 +134,13 @@ class McpEndpointIntegrationTest {
             public void registerAnyUnregisteredSandboxes() {
                 registrationTriggered.set(true);
             }
+
+            @Override
+            public java.util.Optional<run.fabian.daemon.sandboxidentity.api.RegisteredSandbox> findRegistered(String sandboxName) {
+                return java.util.Optional.empty();
+            }
         };
-        McpContext mcp = McpContext.build(service, sandboxIdentityApi, 8788);
+        McpContext mcp = McpContext.build(service, sandboxIdentityApi);
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connectWithHeader(client.getOrigin(), McpContext.SANDBOX_NAME_HEADER, placeholder)) {
@@ -194,7 +204,7 @@ class McpEndpointIntegrationTest {
     @Test
     void checkStatusForUnknownIdIsError() {
         NetworkAccessService service = new NetworkAccessService(new InMemoryRequestRepository(), new SbxCliPolicyAdapter("sbx", true));
-        McpContext mcp = McpContext.build(service, noopSandboxIdentity(), 8788);
+        McpContext mcp = McpContext.build(service, noopSandboxIdentity());
 
         JavalinTest.test(newApp(mcp), (server, client) -> {
             try (McpSyncClient mcpClient = connect(client.getOrigin())) {

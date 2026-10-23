@@ -118,3 +118,46 @@ tr.highlight td {
   border-radius: 4px;
   font-size: 0.9rem;
 }
+
+.hint {
+  color: #555;
+  font-size: 0.85rem;
+}
+
+/* A project host set is a broader grant than one host: visibly distinct, hosts listed in full. */
+tr.set td {
+  background: #eef3ff;
+  border-left: 4px solid #3b5bdb;
+}
+
+tr.set td:first-child {
+  border-left: 4px solid #3b5bdb;
+}
+
+tr.set td + td {
+  border-left: none;
+}
+
+.origin {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #2b4acb;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+ul.hosts {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+ul.hosts li {
+  margin: 0.1rem 0;
+}
+
+code {
+  font-size: 0.85rem;
+}

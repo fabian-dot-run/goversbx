@@ -9,6 +9,9 @@
   <h1>goversbx</h1>
   <p class="subtitle">Pending and decided network-access requests from sandboxes
     <span id="live-state" class="live live-off">connecting...</span></p>
+  <p class="hint">A <strong>project host set</strong> is the standard hosts a project declares in its
+    <code>.goversbx/network.yaml</code>, raised for a new sandbox of that project. The file is writable from
+    inside the sandbox, so read every host before approving the set.</p>
 
   <p id="auth-warning" class="auth-warning" hidden>
     Not authenticated. Open the dashboard with <code>goversbx dashboard</code> so it carries the admin
@@ -24,7 +27,7 @@
     <h2>Pending</h2>
     <table id="pending-table">
       <thead>
-        <tr><th>Sandbox</th><th>Host</th><th>Reason</th><th>Requested</th><th>Decision</th></tr>
+        <tr><th>Sandbox</th><th>Host(s)</th><th>Reason</th><th>Requested</th><th>Decision</th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -35,7 +38,7 @@
     <h2>Decided</h2>
     <table id="decided-table">
       <thead>
-        <tr><th>Sandbox</th><th>Host</th><th>Reason</th><th>Status</th><th>Decided</th><th>sbx result</th></tr>
+        <tr><th>Sandbox</th><th>Host(s)</th><th>Reason</th><th>Status</th><th>Decided</th><th>sbx result</th></tr>
       </thead>
       <tbody></tbody>
     </table>

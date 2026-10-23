@@ -1,6 +1,6 @@
 # Epic 0001: Project host set
 
-Status: draft (2026-10-23)
+Status: accepted (2026-10-23); slice 1 implementing
 
 ## Problem
 

@@ -3,8 +3,8 @@ package run.fabian.daemon.sandboxidentity.api;
 import java.util.Optional;
 
 /**
- * The only thing the {@code mcp} bounded context is allowed to depend on from
- * {@code sandboxidentity}.
+ * The only thing the {@code mcp} and {@code projecthosts} bounded contexts are allowed to depend on
+ * from {@code sandboxidentity}.
  */
 public interface SandboxIdentityApi {
 
@@ -23,4 +23,11 @@ public interface SandboxIdentityApi {
 
     /** Registers every currently-running sandbox this service doesn't yet know about. Best-effort; never throws. */
     void registerAnyUnregisteredSandboxes();
+
+    /**
+     * The sandbox of that name as {@code sbx ls} reports it now (any status), provided the daemon
+     * has registered an identity for the name; empty if it never did or sbx no longer lists it.
+     * Costs one {@code sbx ls}.
+     */
+    Optional<RegisteredSandbox> findRegistered(String sandboxName);
 }

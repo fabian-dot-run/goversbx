@@ -57,4 +57,8 @@ blocked again - request that host too, with the same reason.
   no one is watching). Don't block the rest of your work on it — if the task can proceed without
   the blocked host, do that first and come back to it.
 - Once a host is approved for this sandbox, it stays approved - don't re-request a host that was
-  already approved earlier in the same session.
+  already approved earlier in the same session. If you do, the tool answers `approved` at once.
+- A project can declare its standard hosts in `.goversbx/network.yaml` in the workspace; the daemon
+  then asks the human to approve that whole set when the sandbox starts. If your request for one of
+  those hosts stays `pending`, the human may be deciding the set - it answers your request too.
+  Don't edit that file to get hosts approved: it is only ever applied after a human reads it.

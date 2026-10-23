@@ -48,6 +48,14 @@ class AdminApiTest {
         assertEquals("binary test", r.path("reason").asText());
         Instant.parse(r.path("requestedAt").asText());
         assertTrue(r.path("decidedAt").isNull());
+        // An agent request is a one-host request: the list form carries the same host, no origin details.
+        assertEquals("shape.example", r.path("host").asText());
+        assertEquals(1, r.path("hosts").size());
+        assertEquals("shape.example", r.path("hosts").get(0).asText());
+        assertEquals("AGENT", r.path("origin").asText());
+        assertTrue(r.path("source").isNull());
+        assertEquals(0, r.path("profiles").size());
+        assertTrue(r.path("hostResults").isNull());
         daemon.decide(r.path("id").asText(), "deny");
         p.call().join();
     }
@@ -61,6 +69,9 @@ class AdminApiTest {
         Instant.parse(decided.path("decidedAt").asText());
         assertTrue(decided.path("sbxApplied").asBoolean());
         assertEquals("Added rule (fake sbx)", decided.path("sbxOutput").asText());
+        assertEquals(1, decided.path("hostResults").size());
+        assertEquals("approve.example", decided.path("hostResults").get(0).path("host").asText());
+        assertTrue(decided.path("hostResults").get(0).path("applied").asBoolean());
         assertTrue(daemon.sbx.calls().contains("policy allow network approve.example --sandbox api-approve"), daemon.sbx.calls().toString());
         String text = Mcp.text(p.call().join());
         assertTrue(text.startsWith("Approved - network access to 'approve.example'"), text);

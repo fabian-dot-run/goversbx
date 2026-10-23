@@ -5,7 +5,8 @@ import run.fabian.daemon.sandboxidentity.application.port.SandboxRegistrationSto
 import run.fabian.daemon.sandboxidentity.application.port.SandboxRegistrationStore.RegistrationState;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
-import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.ListedSandbox;
+import run.fabian.daemon.sandboxidentity.api.RegisteredSandbox;
 
 import java.util.List;
 import java.util.Map;
@@ -46,10 +47,14 @@ class SandboxIdentityServiceTest {
     }
 
     private static SbxSandboxListPort listing(String... names) {
-        List<RunningSandbox> sandboxes = java.util.Arrays.stream(names)
-                .map(name -> new RunningSandbox(name, "id-of-" + name))
+        List<ListedSandbox> sandboxes = java.util.Arrays.stream(names)
+                .map(name -> new ListedSandbox(name, "id-of-" + name))
                 .toList();
         return () -> sandboxes;
+    }
+
+    private static SbxCustomSecretPort acceptingPort() {
+        return (n, t, e, p, value) -> new SbxCustomSecretPort.Result(true, "ok");
     }
 
     @Test
@@ -176,14 +181,14 @@ class SandboxIdentityServiceTest {
             calls.add(new Call(sandboxName, targetHost, envVarName, placeholder, value));
             return new SbxCustomSecretPort.Result(true, "ok");
         };
-        AtomicReference<List<RunningSandbox>> running =
-                new AtomicReference<>(List.of(new RunningSandbox("test-goversbx", "first-id")));
+        AtomicReference<List<ListedSandbox>> running =
+                new AtomicReference<>(List.of(new ListedSandbox("test-goversbx", "first-id")));
 
         SandboxIdentityService service = new SandboxIdentityService(
                 port, running::get, "localhost", "VAR", "placeholder");
 
         service.registerAnyUnregisteredSandboxes();
-        running.set(List.of(new RunningSandbox("test-goversbx", "second-id")));
+        running.set(List.of(new ListedSandbox("test-goversbx", "second-id")));
         service.registerAnyUnregisteredSandboxes();
         service.registerAnyUnregisteredSandboxes();
 
@@ -240,9 +245,9 @@ class SandboxIdentityServiceTest {
             return new SbxCustomSecretPort.Result(true, "ok");
         };
         MemoryStore store = new MemoryStore();
-        withStore(port, () -> List.of(new RunningSandbox("sb", "first-id")), store).registerAnyUnregisteredSandboxes();
+        withStore(port, () -> List.of(new ListedSandbox("sb", "first-id")), store).registerAnyUnregisteredSandboxes();
 
-        SandboxIdentityService restarted = withStore(port, () -> List.of(new RunningSandbox("sb", "second-id")), store);
+        SandboxIdentityService restarted = withStore(port, () -> List.of(new ListedSandbox("sb", "second-id")), store);
         restarted.registerAnyUnregisteredSandboxes();
 
         assertEquals(List.of("sb", "sb"), calls.stream().map(Call::sandboxName).toList());
@@ -292,5 +297,96 @@ class SandboxIdentityServiceTest {
         restarted.registerAnyUnregisteredSandboxes();
         assertEquals(2, calls.size());
         assertEquals(Optional.of("sb"), restarted.resolveSandboxName(calls.get(1).value()));
+    }
+
+    @Test
+    void announcesEachNewIncarnationWithItsWorkspacesOnce() {
+        List<RegisteredSandbox> events = new CopyOnWriteArrayList<>();
+        ListedSandbox withWorkspace = new ListedSandbox("ws", "id-1", true, List.of("/home/me/project"));
+        SandboxIdentityService service = new SandboxIdentityService(acceptingPort(), () -> List.of(withWorkspace),
+                "localhost", "VAR", "placeholder");
+        service.subscribe(events::add);
+
+        service.registerAnyUnregisteredSandboxes();
+        service.registerAnyUnregisteredSandboxes();
+
+        assertEquals(List.of(new RegisteredSandbox("ws", "id-1", List.of("/home/me/project"))), events);
+    }
+
+    @Test
+    void doesNotAnnounceAFailedRegistration() {
+        List<RegisteredSandbox> events = new CopyOnWriteArrayList<>();
+        SbxCustomSecretPort failing = (n, t, e, p, value) -> new SbxCustomSecretPort.Result(false, "sbx down");
+        SandboxIdentityService service = new SandboxIdentityService(failing, listing("sb"), "localhost", "VAR", "placeholder");
+        service.subscribe(events::add);
+
+        service.registerAnyUnregisteredSandboxes();
+
+        assertTrue(events.isEmpty());
+    }
+
+    @Test
+    void aRecreatedSandboxIsAnnouncedAgainAsANewIncarnation() {
+        List<RegisteredSandbox> events = new CopyOnWriteArrayList<>();
+        AtomicReference<List<ListedSandbox>> running = new AtomicReference<>(List.of(new ListedSandbox("sb", "first")));
+        SandboxIdentityService service = new SandboxIdentityService(acceptingPort(), running::get, "localhost", "VAR", "placeholder");
+        service.subscribe(events::add);
+
+        service.registerAnyUnregisteredSandboxes();
+        running.set(List.of(new ListedSandbox("sb", "second")));
+        service.registerAnyUnregisteredSandboxes();
+
+        assertEquals(List.of("first", "second"), events.stream().map(RegisteredSandbox::id).toList());
+    }
+
+    @Test
+    void explicitRegistrationAnnouncesTheIncarnationWhenSbxListsIt() {
+        List<RegisteredSandbox> events = new CopyOnWriteArrayList<>();
+        ListedSandbox listed = new ListedSandbox("launched", "id-9", false, List.of("/ws"));   // idle sandboxes stop; still listed
+        SandboxIdentityService service = new SandboxIdentityService(acceptingPort(), () -> List.of(listed), "localhost", "VAR", "placeholder");
+        service.subscribe(events::add);
+
+        service.register("launched");
+        service.register("launched");                     // same incarnation: a fresh token, no second announcement
+        service.registerAnyUnregisteredSandboxes();       // already recorded: nothing to do
+
+        assertEquals(List.of(new RegisteredSandbox("launched", "id-9", List.of("/ws"))), events);
+    }
+
+    @Test
+    void explicitRegistrationOfAnUnlistedSandboxAnnouncesNothing() {
+        List<RegisteredSandbox> events = new CopyOnWriteArrayList<>();
+        SandboxIdentityService service = new SandboxIdentityService(acceptingPort(), listing(), "localhost", "VAR", "placeholder");
+        service.subscribe(events::add);
+
+        assertTrue(service.register("pre-warmed").applied());
+
+        assertTrue(events.isEmpty());
+    }
+
+    @Test
+    void aFailingListenerDoesNotBreakRegistration() {
+        SandboxIdentityService service = new SandboxIdentityService(acceptingPort(), listing("sb"), "localhost", "VAR", "placeholder");
+        service.subscribe(sandbox -> {
+            throw new IllegalStateException("broken listener");
+        });
+
+        service.registerAnyUnregisteredSandboxes();
+
+        assertTrue(service.findRegistered("sb").isPresent());
+    }
+
+    @Test
+    void findRegisteredNeedsBothAnIdentityAndAListing() {
+        ListedSandbox listed = new ListedSandbox("known", "id-k", true, List.of("/w1", "/w2"));
+        AtomicReference<List<ListedSandbox>> ls = new AtomicReference<>(List.of(listed));
+        SandboxIdentityService service = new SandboxIdentityService(acceptingPort(), ls::get, "localhost", "VAR", "placeholder");
+
+        assertEquals(Optional.empty(), service.findRegistered("known"));          // listed but never registered
+        service.registerAnyUnregisteredSandboxes();
+        assertEquals(Optional.of(new RegisteredSandbox("known", "id-k", List.of("/w1", "/w2"))), service.findRegistered("known"));
+        ls.set(List.of());
+        assertEquals(Optional.empty(), service.findRegistered("known"));          // registered but removed since
+        assertEquals(Optional.empty(), service.findRegistered("never"));
     }
 }

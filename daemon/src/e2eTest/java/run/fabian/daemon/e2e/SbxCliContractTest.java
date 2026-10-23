@@ -69,6 +69,18 @@ class SbxCliContractTest {
     }
 
     @Test
+    void policyAllowNetworkTwiceForTheSameHostSucceedsBothTimes() {
+        // Spec 0001 open question 2: the daemon re-requests a sandbox's whole host set after a restart
+        // (grants are in memory), so allowing an already allowed host must not count as a failure.
+        String host = "goversbx-e2e-idempotency-check.invalid";
+        Sbx.Result first = env.sbx.policyAllowNetwork(host, env.a.name);
+        assertTrue(first.ok(), "first sbx policy allow failed:\n" + first.output());
+        Sbx.Result second = env.sbx.policyAllowNetwork(host, env.a.name);
+        assertTrue(second.ok(), "sbx policy allow for an EXISTING rule exits " + second.exit() + " - the daemon would report "
+                + "a re-requested host as failed:\n" + second.output());
+    }
+
+    @Test
     void lsHasTheFormatFlag() {
         assertTrue(env.sbx.help("ls").output().contains("--format"),
                 "sbx ls --help lacks --format (the daemon's default GOVERSBX_SBX_LS_FORMAT_ARGS is '--format json')");

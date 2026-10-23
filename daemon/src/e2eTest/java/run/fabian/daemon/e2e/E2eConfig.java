@@ -25,6 +25,7 @@ import java.util.Optional;
  * GOVERSBX_E2E_ADMIN_PORT            daemon admin port (default: a free loopback port)
  * GOVERSBX_E2E_TARGET_HOST           host the approval flow asks for; must be blocked beforehand (default example.org)
  * GOVERSBX_E2E_DENY_HOST             host the deny flow / the real agent asks for; must be blocked beforehand (default example.net)
+ * GOVERSBX_E2E_SET_HOST              host the project host-set flow declares; must be blocked beforehand (default example.com)
  * GOVERSBX_E2E_WORKSPACE             workspace for the first sandbox: a path, or `none` for a workspace-less sandbox
  *                                    (default: a fresh dir under the run dir; falls back to `none` if sbx denies the mount)
  * GOVERSBX_E2E_KEEP                  1 = keep sandboxes, secrets and the daemon's state dir at the end (debugging)
@@ -52,6 +53,7 @@ final class E2eConfig {
     final int adminPort;
     final String targetHost;
     final String denyHost;
+    final String setHost;
     /** Null = workspace-less. */
     final Path workspace;
     final boolean keep;
@@ -71,6 +73,7 @@ final class E2eConfig {
         adminPort = env("GOVERSBX_E2E_ADMIN_PORT").map(Integer::parseInt).orElseGet(E2eConfig::freePort);
         targetHost = env("GOVERSBX_E2E_TARGET_HOST").orElse("example.org");
         denyHost = env("GOVERSBX_E2E_DENY_HOST").orElse("example.net");
+        setHost = env("GOVERSBX_E2E_SET_HOST").orElse("example.com");
         String ws = env("GOVERSBX_E2E_WORKSPACE").orElse("");
         workspace = ws.equalsIgnoreCase("none") ? null : ws.isBlank() ? runDir.resolve("workspace") : Path.of(ws);
         keep = env("GOVERSBX_E2E_KEEP").map(v -> v.equals("1") || v.equalsIgnoreCase("true")).orElse(false);
@@ -148,7 +151,7 @@ final class E2eConfig {
     public String toString() {
         return "sbx=" + sbxBinary + " jar=" + daemonJar + " kits=" + kitsDir + " runDir=" + runDir
                 + " prefix=" + sandboxPrefix + " daemon=" + daemonUrlFromSandbox() + " admin=127.0.0.1:" + adminPort
-                + " identityTargetHost=" + identityTargetHost + " target=" + targetHost + " deny=" + denyHost
+                + " identityTargetHost=" + identityTargetHost + " target=" + targetHost + " deny=" + denyHost + " set=" + setHost
                 + " workspace=" + (workspace == null ? "none" : workspace) + " keep=" + keep + " agents=" + agents;
     }
 }

@@ -7,6 +7,7 @@ plugins {
 dependencies {
     implementation(libs.jackson.databind)
     implementation(libs.jackson.datatype.jsr310)
+    implementation(libs.jackson.dataformat.yaml)       // the project host-set file and profiles (projecthosts)
     implementation(libs.javalin)
     implementation(libs.mcp.sdk)
     implementation(libs.slf4j.simple)

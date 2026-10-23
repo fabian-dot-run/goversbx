@@ -40,13 +40,7 @@ public final class McpContext {
         this.server = server;
     }
 
-    /**
-     * @param selfAdminPort the daemon's own admin port, which a sandbox must never be able to get
-     *     opened to itself through goversbx (see threat-model F3); passed to the request tool so it
-     *     can reject a request that targets it.
-     */
-    public static McpContext build(
-            NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi, int selfAdminPort) {
+    public static McpContext build(NetworkAccessApi networkAccessApi, SandboxIdentityApi sandboxIdentityApi) {
         McpJsonMapper jsonMapper = new JacksonMcpJsonMapperSupplier().get();
 
         HttpServletStreamableServerTransportProvider servlet = HttpServletStreamableServerTransportProvider.builder()
@@ -60,7 +54,7 @@ public final class McpContext {
                 .serverInfo("goversbx-network", "0.2.7")
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .tools(
-                        RequestNetworkAccessTool.create(networkAccessApi, sandboxIdentityApi, selfAdminPort),
+                        RequestNetworkAccessTool.create(networkAccessApi, sandboxIdentityApi),
                         CheckNetworkAccessStatusTool.create(networkAccessApi))
                 .build();
 

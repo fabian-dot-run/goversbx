@@ -3,7 +3,7 @@ package run.fabian.daemon.sandboxidentity.adapter.sbx;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.ListedSandbox;
 
 import java.util.List;
 
@@ -55,11 +55,23 @@ class SbxCliSandboxListAdapterTest {
             """;
 
     @Test
-    void parsesOnlyRunningSandboxesWithTheirIds() throws Exception {
-        List<RunningSandbox> sandboxes = SbxCliSandboxListAdapter.parseRunningSandboxes(SAMPLE_JSON, new ObjectMapper());
+    void parsesEverySandboxWithIdStatusAndWorkspaces() throws Exception {
+        List<ListedSandbox> sandboxes = SbxCliSandboxListAdapter.parseSandboxes(SAMPLE_JSON, new ObjectMapper());
 
         assertEquals(List.of(
-                new RunningSandbox("claude-goversbx", "defaed17-e79e-4a11-bb65-5c1c527ee557"),
-                new RunningSandbox("omp-secret-manager", "4bc520bc-c650-4304-b892-3ec9e1819d9f")), sandboxes);
+                new ListedSandbox("claude-goversbx", "defaed17-e79e-4a11-bb65-5c1c527ee557", true,
+                        List.of("/Users/fabian/IdeaProjects/goversbx")),
+                new ListedSandbox("omp-secret-manager", "4bc520bc-c650-4304-b892-3ec9e1819d9f", true,
+                        List.of("/Users/fabian/secret_manager", "/Users/fabian/.omp", "/Users/fabian/.config/gh")),
+                new ListedSandbox("old-stopped-sandbox", "11111111-1111-1111-1111-111111111111", false, List.of())),
+                sandboxes);
+    }
+
+    @Test
+    void toleratesRowsWithoutWorkspaces() throws Exception {
+        List<ListedSandbox> sandboxes = SbxCliSandboxListAdapter.parseSandboxes(
+                "[{\"name\":\"bare\",\"id\":\"x\",\"status\":\"running\",\"agent\":\"claude\"}]", new ObjectMapper());
+
+        assertEquals(List.of(new ListedSandbox("bare", "x", true, List.of())), sandboxes);
     }
 }

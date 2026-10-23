@@ -13,6 +13,9 @@ import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
+import run.fabian.daemon.projecthosts.adapter.file.YamlHostSetSource;
+import run.fabian.daemon.projecthosts.adapter.web.ProjectHostSetController;
+import run.fabian.daemon.projecthosts.application.ProjectHostSetService;
 import run.fabian.daemon.sandboxidentity.adapter.persistence.FileSandboxRegistrationStore;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliSandboxListAdapter;
@@ -50,7 +53,9 @@ public final class Main {
 
         RequestRepository repository = new InMemoryRequestRepository();
         SbxPolicyPort sbxPolicyPort = new SbxCliPolicyAdapter(sbxBinary, dryRun);
-        NetworkAccessService networkAccessService = new NetworkAccessService(repository, sbxPolicyPort);
+        // The admin port is passed in so the request flow itself refuses a host that points at the
+        // daemon's own admin API (threat-model F3), on every path - agent tool and project file alike.
+        NetworkAccessService networkAccessService = new NetworkAccessService(repository, sbxPolicyPort, adminPort);
 
         SbxCustomSecretPort sbxCustomSecretPort = new SbxCliCustomSecretAdapter(sbxBinary, dryRun);
         SbxSandboxListPort sbxSandboxListPort = new SbxCliSandboxListAdapter(sbxBinary, lsFormatArgs);
@@ -65,7 +70,15 @@ public final class Main {
                 identityTargetHost, identityEnvVar, identityPlaceholder, identitySandboxPattern);
         log.info("Sandbox registrations are kept in {}", registrationStore.file());
 
-        McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService, adminPort);
+        // A sandbox created anew under a known name starts with no grants; then its project file
+        // (if any workspace has one) becomes one host-set request. Listener order matters.
+        sandboxIdentityService.subscribe(sandbox -> networkAccessService.forgetGrants(sandbox.name()));
+        YamlHostSetSource hostSetSource = new YamlHostSetSource(DaemonConfig.profilesDir());
+        ProjectHostSetService projectHostSetService = new ProjectHostSetService(hostSetSource, networkAccessService);
+        sandboxIdentityService.subscribe(projectHostSetService::onSandboxRegistered);
+        log.info("Project host sets: <workspace>/.goversbx/network.yaml, profiles in {}", hostSetSource.profilesDir());
+
+        McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService);
 
         // Javalin 7: routes are registered on config.routes inside create(...), not on the instance.
         Javalin sandboxApp = Javalin.create(cfg -> {
@@ -86,6 +99,7 @@ public final class Main {
             new AdminApiController(networkAccessService).registerRoutes(cfg.routes);
             eventStream.registerRoutes(cfg.routes);
             new SandboxIdentityController(sandboxIdentityService).registerRoutes(cfg.routes);
+            new ProjectHostSetController(projectHostSetService, sandboxIdentityService).registerRoutes(cfg.routes);
         });
         adminApp.start("127.0.0.1", adminPort);
         log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only, token-gated)", adminPort);

@@ -1,20 +1,24 @@
 package run.fabian.daemon.sandboxidentity.application;
 
+import run.fabian.daemon.sandboxidentity.api.RegisteredSandbox;
 import run.fabian.daemon.sandboxidentity.api.SandboxIdentityApi;
+import run.fabian.daemon.sandboxidentity.api.SandboxRegistrationListener;
 import run.fabian.daemon.sandboxidentity.application.port.SandboxRegistrationStore;
 import run.fabian.daemon.sandboxidentity.application.port.SandboxRegistrationStore.RegistrationState;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
-import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.RunningSandbox;
+import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort.ListedSandbox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Pattern;
 
 /**
@@ -45,6 +49,10 @@ import java.util.regex.Pattern;
  * state is lost anyway (file deleted, unreadable), the old self-heal still applies: a stale token
  * doesn't resolve, which triggers one re-registration that mints a fresh token and overwrites the
  * sbx secret live, and the next retry works.
+ *
+ * <p>Every <em>new incarnation</em> this service registers is announced to the
+ * {@link SandboxRegistrationListener}s (with the workspaces {@code sbx ls} reports), so other
+ * contexts can act on a sandbox's first appearance - the project host set is raised from there.
  */
 public final class SandboxIdentityService implements SandboxIdentityApi {
 
@@ -85,6 +93,7 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
      * sandbox, so they stay safe; the map grows slowly over a daemon's lifetime, acceptable for now.
      */
     private final Map<String, String> tokenToName = new ConcurrentHashMap<>();
+    private final List<SandboxRegistrationListener> listeners = new CopyOnWriteArrayList<>();
 
     public SandboxIdentityService(
             SbxCustomSecretPort secretPort, SbxSandboxListPort listPort,
@@ -133,29 +142,59 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
 
     @Override
     public void registerAnyUnregisteredSandboxes() {
-        for (RunningSandbox sandbox : listPort.listRunningSandboxes()) {
-            String key = sandbox.name() + "@" + sandbox.id();
-            if (registered.contains(key) || !sandboxNamePattern.matcher(sandbox.name()).matches()) {
+        for (ListedSandbox sandbox : listPort.listSandboxes()) {
+            if (!sandbox.running() || isRegisteredIncarnation(sandbox) || !sandboxNamePattern.matcher(sandbox.name()).matches()) {
                 continue;
             }
-            SandboxRegistrationResult result = register(sandbox.name());
+            SandboxRegistrationResult result = mintAndRegister(sandbox.name());
             if (result.applied()) {
-                registered.add(key);
-                persist();
+                recordIncarnation(sandbox);
             } else {
                 log.warn("Failed to register sandbox identity for {}: {}", sandbox.name(), result.output());
             }
         }
     }
 
+    @Override
+    public Optional<RegisteredSandbox> findRegistered(String sandboxName) {
+        if (!tokenToName.containsValue(sandboxName)) {
+            return Optional.empty();
+        }
+        return listPort.listSandboxes().stream()
+                .filter(s -> sandboxName.equals(s.name()))
+                .findFirst()
+                .map(s -> new RegisteredSandbox(s.name(), s.id(), s.workspaces()));
+    }
+
     /**
-     * Mints a fresh token for {@code sandboxName}, registers it as the substitution secret, and - on
-     * success - records (and persists) the token so {@link #resolveSandboxName(String)} recognizes
-     * it. Called both by the reactive pass and by the admin endpoint; doesn't touch the
-     * {@code registered} set (the admin path doesn't know the incarnation id), so the next reactive
-     * pass may register once more, which is harmless.
+     * The admin endpoint's explicit registration: mints a fresh token for {@code sandboxName} and
+     * registers it as the substitution secret, whether or not the sandbox is known or running
+     * (pre-warming). If {@code sbx ls} lists the sandbox and this incarnation wasn't registered
+     * before, it is recorded as registered and announced like a reactive registration - so a
+     * sandbox the launcher registers right after creating it gets its project host set at once.
      */
     public SandboxRegistrationResult register(String sandboxName) {
+        SandboxRegistrationResult result = mintAndRegister(sandboxName);
+        if (result.applied()) {
+            listPort.listSandboxes().stream()
+                    .filter(s -> sandboxName.equals(s.name()) && !isRegisteredIncarnation(s))
+                    .findFirst()
+                    .ifPresent(this::recordIncarnation);
+        }
+        return result;
+    }
+
+    /** Registers a listener for new incarnations; the returned handle removes it again. */
+    public Runnable subscribe(SandboxRegistrationListener listener) {
+        listeners.add(listener);
+        return () -> listeners.remove(listener);
+    }
+
+    /**
+     * Mints a fresh token, registers it as the substitution secret, and - on success - records (and
+     * persists) the token so {@link #resolveSandboxName(String)} recognizes it.
+     */
+    private SandboxRegistrationResult mintAndRegister(String sandboxName) {
         String token = newToken();
         SbxCustomSecretPort.Result result =
                 secretPort.registerPlaceholderSecret(sandboxName, targetHost, envVarName, placeholder, token);
@@ -164,6 +203,27 @@ public final class SandboxIdentityService implements SandboxIdentityApi {
             persist();
         }
         return new SandboxRegistrationResult(sandboxName, result.applied(), result.output());
+    }
+
+    private boolean isRegisteredIncarnation(ListedSandbox sandbox) {
+        return registered.contains(incarnationKey(sandbox));
+    }
+
+    private void recordIncarnation(ListedSandbox sandbox) {
+        registered.add(incarnationKey(sandbox));
+        persist();
+        RegisteredSandbox event = new RegisteredSandbox(sandbox.name(), sandbox.id(), sandbox.workspaces());
+        for (SandboxRegistrationListener listener : listeners) {
+            try {
+                listener.sandboxRegistered(event);
+            } catch (RuntimeException e) {
+                log.warn("Sandbox-registration listener failed for {}", sandbox.name(), e);
+            }
+        }
+    }
+
+    private static String incarnationKey(ListedSandbox sandbox) {
+        return sandbox.name() + "@" + sandbox.id();
     }
 
     /** Saves a consistent snapshot; serialized so two concurrent registrations can't interleave writes. */

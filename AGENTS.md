@@ -91,6 +91,14 @@ why). Internally it is split into bounded contexts under `daemon/src/main/java/r
   `RequestStatus`).
 - **`mcp`** - pure MCP-protocol translation. Has no domain of its own by design - it only adapts
   MCP tool calls into calls on `networkaccess.api`.
+- **`projecthosts`** - turns a workspace's `.goversbx/network.yaml` (plus user profiles from
+  `$XDG_CONFIG_HOME/goversbx/profiles/`) into one host-set request via `networkaccess.api`
+  (spec `docs/specs/0001-project-host-set/`). Thin: `domain` (file rules, resolved set),
+  `application` (`ProjectHostSetService`, port `HostSetSource`), `adapter.file.YamlHostSetSource`
+  (Jackson YAML tree model, strict, no symlinks), `adapter.web` (the explicit admin trigger
+  `POST /api/sandboxes/{name}/host-set-requests`). Triggered by `sandboxidentity`'s registration
+  events (`sandboxidentity.api.SandboxRegistrationListener`), wired in `Main`. Host syntax is judged
+  through `NetworkAccessApi.hostRejectionReason`, never by importing `networkaccess.domain`.
 - **`sandboxidentity`** - registers a sandbox's proxy-verified identity secret, reactively
   (`sbx secret set-custom` + `sbx ls`, see "Sandbox identity" below). No domain - it's a thin
   `application` (+ `port`) → `adapter` wrapper around two `sbx` CLI calls, same shape as
@@ -105,6 +113,13 @@ why). Internally it is split into bounded contexts under `daemon/src/main/java/r
 `.adapter` directly - only its published `.api` package. This is enforced by convention/code
 review, not by the Java module system (JPMS would be real overkill here given Jetty/Reactor aren't
 cleanly modularized). If you add a fourth concern to this daemon, give it the same shape.
+
+`networkaccess`'s aggregate is one request with one or more hosts (`NetworkAccessRequest.getHosts()`,
+`RequestOrigin.AGENT` for the tool's single host, `PROJECT_FILE` for a host set), approved per host
+(`HostGrant`), and the service keeps the hosts granted per sandbox name in memory (`grantedHosts`,
+wiped by `forgetGrants` when a new incarnation registers). The F3 admin-port guard is
+`domain.LocalTargetGuard`, applied by the service on every path (the admin port is a constructor
+argument); the MCP tool no longer has a guard of its own.
 
 Within `networkaccess`: `domain` has zero framework dependencies (no Javalin, no Jetty, no MCP
 SDK, no `ProcessBuilder`) and owns its own invariants - e.g. `NetworkAccessRequest.approve()`/

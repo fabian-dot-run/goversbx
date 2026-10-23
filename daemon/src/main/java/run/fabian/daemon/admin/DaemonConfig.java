@@ -135,9 +135,22 @@ public final class DaemonConfig {
     // --- config file ----------------------------------------------------------------------------
 
     private static Path configFile() {
+        return configDir().resolve("config.properties");
+    }
+
+    /** {@code $XDG_CONFIG_HOME/goversbx} (default {@code ~/.config/goversbx}). */
+    public static Path configDir() {
         String xdg = env("XDG_CONFIG_HOME");
         Path base = xdg != null ? Path.of(xdg) : Path.of(System.getProperty("user.home"), ".config");
-        return base.resolve("goversbx").resolve("config.properties");
+        return base.resolve("goversbx");
+    }
+
+    /**
+     * User-supplied host-set profiles ({@code <name>.yaml}) a project file may reference. Deliberately
+     * only here, next to the config file - no override, no shipped profiles (spec 0001).
+     */
+    public static Path profilesDir() {
+        return configDir().resolve("profiles");
     }
 
     private static Properties readOrCreateConfigFile() {

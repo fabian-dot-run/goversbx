@@ -334,6 +334,17 @@ workspace path from `sbx ls`) next to the agent-supplied reason, and visually se
 "attested by the daemon" fields from "claimed by the agent" ones. Residual risk remains and is
 accepted.
 
+*Addendum (2026-10-23, spec 0001 slice 1).* The project file `<workspace>/.goversbx/network.yaml`
+is a second attacker-influenced input: the workspace is writable from inside the sandbox, so the
+agent can write any host list into it. Mitigations as built: the file never grants anything on its
+own - it becomes one pending host-set request the human decides as a whole, every time; the
+dashboard lists every host of the set and marks it as a broader grant; the hosts pass the same F2/F3
+rules as the tool's `host` (`HostValidation`, `LocalTargetGuard`), one bad entry invalidates the
+whole file; at most 100 hosts, 64 KiB, no symlinks; the daemon reads only the path `sbx ls` reports
+as a workspace, never one the agent names. Profiles live in the user's config dir, outside every
+sandbox. Residual risk: the human skims a long list - hence the cap and the "read every host" hint
+in the UI. Slice 3 (hash-pinned auto-apply) must keep the first approval of any file content human.
+
 '''
 
 == Notes
