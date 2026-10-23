@@ -15,7 +15,18 @@ one line per host, both hosts reachable. So `SbxCliPolicyAdapter` now applies a 
 (comma list, each host's line as its outcome) and falls back to per-host calls only if that fails
 (`FakeSbx.failPolicyFor` matches inside a comma list; contract tests pin both shapes). Also removed a
 stray `hostSet` JSON property Jackson had derived from a view method (seen in the e2e output).
-`./gradlew check` green (108 unit, 77 contract). **Next**: the user looks at a set in the dashboard
+`./gradlew check` green (108 unit, 77 contract).
+
+Independent check in the nested dev sandbox (2026-10-23, agent-driven, two e2e runs): run 1 proved
+the set flow against the inner sbx (daemon log: "Host set of 1 host(s) ... is pending", then
+`policy allow network example.com --sandbox ...-a succeeded`) and failed only in
+`lsReportsASandboxAsRunningWhileACommandRunsInIt`: its background `sbx exec` first had to start the
+idle sandbox (49 s there) and overran the 60 s wait - fixed in 4f9c649 (wait 3 min, like
+`Sandbox.sh`). Run 2 hit an inner-sbx infrastructure error when `sbx exec` restarted the idle `-a`
+("cannot start sandbox: start runtime: 500 ... docker daemon failed to start inside the sandbox"), so
+`ProjectHostSetTest` failed 3 times there as a consequence (no MCP call reached the daemon; the
+comma-list test on `-b` still passed). Not a daemon defect; the host run is the green reference.
+**Next**: the user looks at a set in the dashboard
 once (scenario 14), bump the version (kit specs 0.2.7, MCP server info 0.2.7, README says 0.2.8
 unreleased), release, then slice 2 (launcher trigger: `goversbx run` registers the sandbox right
 after `sbx create` and calls `POST /api/sandboxes/{name}/host-set-requests`).
