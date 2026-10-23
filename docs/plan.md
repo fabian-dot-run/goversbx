@@ -770,3 +770,17 @@ sbx is durable, so the daemon's knowledge of it has to be too.
   (`DaemonProcess` now gives every daemon its own state dir by default). Verified with `./gradlew
   check` on the JVM; `binaryTestNative` is gated in the release workflow.
 
+
+## Revision (2026-10-23): spec-driven development; epic 0001 "project host set", slice 1
+
+From here on features start as specs under `docs/specs/` (convention in `docs/specs/README.md`).
+Epic 0001 (`docs/specs/0001-project-host-set/`): a project declares its standard hosts in
+`.goversbx/network.yaml` (plus user profiles in `~/.config/goversbx/profiles/`); when the daemon
+registers a new sandbox incarnation it raises ONE host-set request the human decides as a whole.
+Options considered, the decision (daemon-raised set at registration, launcher trigger and hash-pinned
+auto-apply as later slices) and why shipped host lists are deferred are in `epic.md`; the contract,
+decisions and 16 scenarios of slice 1 in `slice-1.md`. Architecture outcome: `networkaccess`'s
+aggregate is now a request with one or more hosts and per-host grants; the F3 guard lives in the
+domain; `sandboxidentity` announces new incarnations; a new thin context `projecthosts` reads the
+files. Verified on sbx 0.49.1 that `policy allow` is idempotent ("Already covered", exit 0) and that
+a comma-separated list with `--sandbox` creates one rule per host - the adapter uses one call per set.

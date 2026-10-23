@@ -213,7 +213,8 @@ it reads the file from every workspace `sbx ls` reports for it and raises **one 
 in the dashboard: profile hosts first, then the file's hosts, each once, hosts already granted to
 the sandbox left out. The human approves or denies the set as a whole, every time - the file is
 writable from inside the sandbox, so it never grants anything by itself. On approval the daemon runs
-`sbx policy allow network <host> --sandbox <name>` per host and shows each host's outcome; pending
+one `sbx policy allow network <host>,<host>,... --sandbox <name>` and shows each host's outcome
+(per host if that call fails); pending
 single requests of that sandbox for hosts in the set are answered by the same decision, and a later
 `request_network_access` for a host already granted to the sandbox is approved at once.
 

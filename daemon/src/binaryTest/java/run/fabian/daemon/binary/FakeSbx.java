@@ -21,7 +21,7 @@ final class FakeSbx {
             d="$(cd "$(dirname "$0")" && pwd)"
             printf '%s\\n' "$*" >> "$d/calls.log"
             case "$1" in ls|secret|policy) cmd="$1" ;; *) cmd=other ;; esac
-            if [ -f "$d/$cmd.failfor" ] && printf '%s' " $* " | grep -q -F " $(cat "$d/$cmd.failfor") "; then
+            if [ -f "$d/$cmd.failfor" ] && printf '%s' " $* " | tr ',' ' ' | grep -q -F " $(cat "$d/$cmd.failfor") "; then
               echo "fake sbx: refused $(cat "$d/$cmd.failfor")"; exit 1
             fi
             [ -f "$d/$cmd.out" ] && cat "$d/$cmd.out"
@@ -65,7 +65,7 @@ final class FakeSbx {
         return respond("ls", 0, json);
     }
 
-    /** `sbx policy ...` fails (exit 1) whenever its argv contains this exact word, e.g. one host of a set. */
+    /** `sbx policy ...` fails (exit 1) whenever its argv names this host, alone or inside a comma-separated list. */
     FakeSbx failPolicyFor(String host) {
         try {
             Files.writeString(dir.resolve("policy.failfor"), host);

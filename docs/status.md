@@ -3,7 +3,24 @@
 Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-## Slice 1 of epic 0001 implemented (2026-10-23, not yet released, e2e run pending)
+## Slice 1 of epic 0001 done (2026-10-23, e2e green on the host, not yet released)
+
+The e2e suite ran green on the user's macOS host against sbx 0.49.1 (27 passed, `ClaudeAgentTest`
+skipped as usual, 1m23s): the project file raised one set on re-registration, approval ran
+`sbx policy allow` and `example.com` answered 200 from `-a` only, the explicit trigger reported
+`ALL_GRANTED`, the agent's request for the granted host was approved at once. **Both spec questions
+are answered**: a second `policy allow` for the same host prints "Already covered in policy local"
+with exit 0 (idempotent), and `policy allow network a,b --sandbox` creates one rule per host, prints
+one line per host, both hosts reachable. So `SbxCliPolicyAdapter` now applies a set with ONE call
+(comma list, each host's line as its outcome) and falls back to per-host calls only if that fails
+(`FakeSbx.failPolicyFor` matches inside a comma list; contract tests pin both shapes). Also removed a
+stray `hostSet` JSON property Jackson had derived from a view method (seen in the e2e output).
+`./gradlew check` green (108 unit, 77 contract). **Next**: the user looks at a set in the dashboard
+once (scenario 14), bump the version (kit specs 0.2.7, MCP server info 0.2.7, README says 0.2.8
+unreleased), release, then slice 2 (launcher trigger: `goversbx run` registers the sandbox right
+after `sbx create` and calls `POST /api/sandboxes/{name}/host-set-requests`).
+
+## Slice 1 of epic 0001 implemented (2026-10-23, superseded by the entry above)
 
 The user settled the spec's open questions (unified request entity; profiles only in the config
 dir; verify sbx idempotency and the comma list, use the comma form right away if it works). Built

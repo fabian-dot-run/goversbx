@@ -50,8 +50,4 @@ public record NetworkAccessRequestView(
                 request.getSbxOutput(),
                 request.getGrants());
     }
-
-    public boolean isHostSet() {
-        return origin == RequestOrigin.PROJECT_FILE;
-    }
 }

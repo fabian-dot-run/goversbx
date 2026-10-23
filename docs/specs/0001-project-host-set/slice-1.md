@@ -1,7 +1,8 @@
 # Slice 1: batch request from the project file
 
-Status: implementing (2026-10-23; decisions below taken by the user, code and contract tests in
-place, the e2e run on a real sbx is pending). Epic: `epic.md`.
+Status: done (2026-10-23). Epic: `epic.md`. Every scenario has its test; the e2e suite was green on
+the user's host against sbx 0.49.1 (27 passed, the opt-in agent test skipped). Scenario 14's rendering
+is the one thing checked by hand, not by a test.
 
 ## Decisions (2026-10-23)
 
@@ -9,12 +10,16 @@ place, the e2e run on a real sbx is pending). Epic: `epic.md`.
    (`AGENT` / `PROJECT_FILE`), the source file and profile names, and per-host outcomes
    (`HostGrant`). An agent request is a set of one. One approval flow, one repository, one view with
    `hosts`; `host` stays set for single requests and is `null` for a set.
-2. **sbx idempotency** (`sbx policy allow` for an existing rule): verified by
-   `SbxCliContractTest.policyAllowNetworkTwiceForTheSameHostSucceedsBothTimes` in the e2e suite.
-3. **Comma-separated list with `--sandbox`**: verified by reachability in
-   `ProjectHostSetTest.aCommaSeparatedHostListIsAcceptedBySbxPolicyAllowWithSandbox` (e2e). The daemon
-   applies per host until that run is green; then the batch form is an adapter-only change
-   (`SbxPolicyPort.allowNetwork(sandbox, hosts)` is the seam) and this spec is updated.
+2. **sbx idempotency**: verified on sbx 0.49.1 (e2e
+   `SbxCliContractTest.policyAllowNetworkTwiceForTheSameHostSucceedsBothTimes`): a second
+   `policy allow` for the same host prints `Already covered in policy local (...)` and exits 0. So the
+   restart re-request (scenario 16) is redundant but harmless, and counts as applied.
+3. **Comma-separated list with `--sandbox`**: verified on sbx 0.49.1 by reachability (e2e
+   `ProjectHostSetTest.aCommaSeparatedHostListIsAcceptedBySbxPolicyAllowWithSandbox`): one call creates
+   one rule per host, prints one line per host. **The daemon now applies a set with one call**,
+   `sbx policy allow network a,b,c --sandbox <name>`, and takes each host's line as its outcome; if
+   that call fails it falls back to one call per host, so the per-host outcome the approver sees is
+   exact. Contract pinned by `binaryTest/ProjectHostSetTest` (approval, partial failure).
 4. **Profiles only in the config dir** (`$XDG_CONFIG_HOME/goversbx/profiles/`, default
    `~/.config/goversbx/profiles/`); no `profilesDir` setting.
 
@@ -101,9 +106,9 @@ new set; after a restart this knowledge is gone and a re-trigger re-requests the
 persistence).
 
 **Decision.** A set is approved or denied as a whole, by the human, every time. On approval the
-daemon runs `sbx policy allow network <host> --sandbox <name>` per host, sequentially, records
-each host's outcome, and the request is `approved` with `sbxApplied = true` only if every host
-applied. Failed hosts stay requestable by the agent as singles. Pending single requests of the
+daemon runs `sbx policy allow network <host>[,<host>...] --sandbox <name>` once for the set (per
+host if that call fails), records each host's outcome, and the request is `approved` with
+`sbxApplied = true` only if every host applied. Failed hosts stay requestable by the agent as singles. Pending single requests of the
 same sandbox whose host is in the approved set are resolved by that decision (same `decidedBy`,
 the host's outcome), and their waiting tool calls return. Denial runs no sbx command, touches no
 single request, and leaves T2 free to create a new request later (the user may have edited the
@@ -150,11 +155,12 @@ count. Auto-open applies as for singles.
 5. **No file, no request.** Given a workspace without the file, when the sandbox registers, then
    no request exists and nothing is logged above debug. `contract`
 6. **Approval applies every host.** Given a pending set of three hosts, when the human approves
-   it, then `FakeSbx` recorded exactly three `policy allow network <host> --sandbox <name>` calls in
-   file order and the request is `approved` with `sbxApplied` true. `contract`
+   it, then `FakeSbx` recorded exactly one `policy allow network <a>,<b>,<c> --sandbox <name>` call
+   with the hosts in file order and the request is `approved` with `sbxApplied` true. `contract`
 7. **Partial sbx failure is visible.** Given `FakeSbx` fails for the second host, when the set
-   is approved, then the request is `approved` with `sbxApplied` false, the per-host outcomes name
-   the failed host, and the other two were applied. `contract`
+   is approved, then the batch call failed and each host was applied on its own, the request is
+   `approved` with `sbxApplied` false, the per-host outcomes name the failed host, and the other two
+   were applied. `contract`
 8. **Denial applies nothing.** Given a pending set, when the human denies it, then no sbx call
    was recorded and the request is `denied`. `contract`
 9. **Set resolves pending singles.** Given a pending single request from sandbox A for host H
@@ -189,6 +195,7 @@ count. Auto-open applies as for singles.
   (`agent` / `project-file`) and per-host outcomes, a single request being a list of one. One
   approval flow, one repository, one API view with a `hosts` array; the dashboard switches on the
   size/origin. Avoids a parallel entity and a second approve/deny path.
+- (Built as described: `NetworkAccessRequest` with `hosts`, `origin`, `HostGrant`s.)
 - Reading the file belongs to a new, thin bounded context (`projecthosts`: file + profile
   resolution, no sbx) exposing a published `api`; `sandboxidentity` notifies through a listener
   on registration and `networkaccess` creates the request. `networkaccess` must not read files.

@@ -149,14 +149,12 @@ class ProjectHostSetTest {
 
             assertEquals("APPROVED", decided.path("status").asText());
             assertTrue(decided.path("sbxApplied").asBoolean());
-            assertEquals(List.of(
-                    "policy allow network a.example --sandbox proj-ok",
-                    "policy allow network b.example --sandbox proj-ok",
-                    "policy allow network c.example --sandbox proj-ok"), policyCalls(sbx));
+            // One sbx call for the whole set, hosts comma-separated in file order (verified on sbx 0.49.1).
+            assertEquals(List.of("policy allow network a.example,b.example,c.example --sandbox proj-ok"), policyCalls(sbx));
             assertEquals(3, decided.path("hostResults").size());
             decided.path("hostResults").forEach(r -> assertTrue(r.path("applied").asBoolean(), r.toString()));
             assertEquals("Added rule (fake sbx)", decided.path("hostResults").get(2).path("output").asText());
-            assertTrue(daemon.log().contains("sbx policy allow network c.example --sandbox proj-ok succeeded"), daemon.log());
+            assertTrue(daemon.log().contains("sbx policy allow network a.example,b.example,c.example --sandbox proj-ok succeeded"), daemon.log());
         }
     }
 
@@ -176,7 +174,12 @@ class ProjectHostSetTest {
             assertEquals("fake sbx: refused b.example", results.get(1).path("output").asText());
             assertTrue(results.get(2).path("applied").asBoolean());
             assertTrue(decided.path("sbxOutput").asText().contains("b.example: fake sbx: refused b.example"), decided.toString());
-            assertEquals(3, policyCalls(sbx).size());
+            // The batch call failed, so each host was applied on its own to get an exact per-host outcome.
+            assertEquals(List.of(
+                    "policy allow network a.example,b.example,c.example --sandbox proj-part",
+                    "policy allow network a.example --sandbox proj-part",
+                    "policy allow network b.example --sandbox proj-part",
+                    "policy allow network c.example --sandbox proj-part"), policyCalls(sbx));
             // The failed host stays requestable by the agent: a single request for it is pending, not shortcut.
             var call = daemon.asSandbox("proj-part").requestAccessAsync("b.example", 30);
             JsonNode single = daemon.awaitPending("b.example");
@@ -218,7 +221,7 @@ class ProjectHostSetTest {
             assertEquals("binary-test", resolved.path("decidedBy").asText());
             assertTrue(resolved.path("sbxApplied").asBoolean());
             // Applied once, by the set - not again for the single.
-            assertEquals(3, policyCalls(sbx).size(), sbx.calls().toString());
+            assertEquals(1, policyCalls(sbx).size(), sbx.calls().toString());
         }
     }
 
@@ -241,7 +244,7 @@ class ProjectHostSetTest {
             assertEquals("APPROVED", answered.path("status").asText());
             assertEquals("goversbx", answered.path("decidedBy").asText());
             assertTrue(daemon.adminJson("/api/requests?status=pending").isEmpty());
-            assertEquals(3, policyCalls(sbx).size(), "no sbx call for the already granted host: " + sbx.calls());
+            assertEquals(1, policyCalls(sbx).size(), "no sbx call for the already granted host: " + sbx.calls());
         }
     }
 
