@@ -49,7 +49,9 @@ class SbxCliContractTest {
             }
             assertEquals("running", status, "sbx ls does not report " + env.a + " as running while a command runs in it");
         } finally {
-            busy.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            // The exec may first have to start the stopped sandbox (49 s seen in the nested dev sandbox),
+            // so wait as long as Sandbox.sh itself does.
+            busy.get(3, java.util.concurrent.TimeUnit.MINUTES);
         }
     }
 
