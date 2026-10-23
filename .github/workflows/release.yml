@@ -30,6 +30,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0          # the previous tag, for the release notes' compare link
 
       - uses: graalvm/setup-graalvm@v1
         with:
@@ -53,10 +55,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "build/release/goversbx-$VERSION-darwin-arm64.tar.gz" \
-            "build/release/goversbx-$VERSION-darwin-arm64.tar.gz.sha256" \
-            --title "goversbx $VERSION" --generate-notes
+          # Notes come from CHANGELOG.md (scripts/release-notes.sh); a version without a section
+          # still releases, with GitHub's generated notes, but says so in the job log.
+          notes="$RUNNER_TEMP/notes.md"
+          if scripts/release-notes.sh "$VERSION" > "$notes"; then
+            previous="$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+            [ -z "$previous" ] || printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$previous" "$GITHUB_REF_NAME" >> "$notes"
+            gh release create "$GITHUB_REF_NAME" \
+              "build/release/goversbx-$VERSION-darwin-arm64.tar.gz" \
+              "build/release/goversbx-$VERSION-darwin-arm64.tar.gz.sha256" \
+              --title "goversbx $VERSION" --notes-file "$notes"
+          else
+            echo "::warning::CHANGELOG.md has no section for $VERSION - publishing generated notes"
+            gh release create "$GITHUB_REF_NAME" \
+              "build/release/goversbx-$VERSION-darwin-arm64.tar.gz" \
+              "build/release/goversbx-$VERSION-darwin-arm64.tar.gz.sha256" \
+              --title "goversbx $VERSION" --generate-notes
+          fi
 
       - name: Update the Homebrew tap
         if: github.ref_type == 'tag'

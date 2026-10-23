@@ -67,11 +67,14 @@ works unpacked as is.
 
 ### Releasing
 
-Push a tag `v<version>`. `.github/workflows/release.yml` builds the native binary on an Apple
-Silicon runner (native-image can't cross-compile), smoke-tests it, attaches the tarball to a GitHub
-release and updates `Formula/goversbx.rb` in the tap repo (rendered from
-`packaging/homebrew/goversbx.rb.template`; setup notes at the top of the workflow). Locally, on any
-platform: `GRAALVM_HOME=... scripts/package-release.sh`.
+Add the version's section to `CHANGELOG.md`, bump the version (`build.gradle.kts`, the kits'
+`spec.yaml`, the MCP server info in `McpContext`), then push a tag `v<version>`.
+`.github/workflows/release.yml` builds the native binary on an Apple Silicon runner (native-image
+can't cross-compile), smoke-tests it, attaches the tarball to a GitHub release whose notes are that
+changelog section (`scripts/release-notes.sh`), and updates `Formula/goversbx.rb` in the tap repo
+(rendered from `packaging/homebrew/goversbx.rb.template`; its caveats link to the release notes;
+setup notes at the top of the workflow). Locally, on any platform:
+`GRAALVM_HOME=... scripts/package-release.sh`.
 
 ### Testing the native binary
 

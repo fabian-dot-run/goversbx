@@ -15,6 +15,7 @@ class Goversbx < Formula
   def install
     libexec.install "bin/goversbx", "bin/goversbx-daemon"
     pkgshare.install "share/goversbx/kits", "share/goversbx/VERSION"
+    pkgshare.install "share/goversbx/CHANGELOG.md" if File.exist?("share/goversbx/CHANGELOG.md")
     # opt_ paths survive upgrades, so a daemon started by `goversbx start` keeps a valid binary path.
     (bin/"goversbx").write_env_script libexec/"goversbx",
       GOVERSBX_DAEMON_BIN: opt_libexec/"goversbx-daemon",
@@ -40,6 +41,10 @@ class Goversbx < Formula
       Admin UI (approve/deny requests): http://127.0.0.1:8788
       New sandbox with the kit:         goversbx run claude ~/my-project
                                         (--goversbx-kit pi|omp|opencode for other agents)
+      Standard hosts of a project:      <workspace>/.goversbx/network.yaml (one approval per sandbox)
+
+      What changed in @VERSION@: https://github.com/@REPO@/releases/tag/v@VERSION@
+      After an upgrade, restart the daemon: brew services restart goversbx (or goversbx stop && goversbx start)
     EOS
   end
 

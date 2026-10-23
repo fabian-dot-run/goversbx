@@ -9,6 +9,7 @@
 #      goversbx-<version>/bin/goversbx-daemon     native daemon, no JVM needed
 #      goversbx-<version>/share/goversbx/kits/    sbx kits, used by `goversbx run`
 #      goversbx-<version>/share/goversbx/VERSION
+#      goversbx-<version>/share/goversbx/CHANGELOG.md
 # The launcher finds the daemon and kits relative to itself, so the unpacked tarball works as is;
 # the Homebrew formula (packaging/homebrew/) installs the same files. native-image can't
 # cross-compile, so run this on each target platform (CI: .github/workflows/release.yml).
@@ -52,7 +53,8 @@ chmod 755 "$STAGE/bin/goversbx" "$STAGE/bin/goversbx-daemon"
 cp -R "$REPO_DIR/sandbox-kit/kits" "$STAGE/share/goversbx/kits"
 find "$STAGE/share/goversbx/kits" -name '*.sh' -exec chmod 755 {} +
 echo "$VERSION" > "$STAGE/share/goversbx/VERSION"
-cp "$REPO_DIR/README.md" "$STAGE/"
+cp "$REPO_DIR/CHANGELOG.md" "$STAGE/share/goversbx/CHANGELOG.md"
+cp "$REPO_DIR/README.md" "$REPO_DIR/CHANGELOG.md" "$STAGE/"
 tar -C "$OUT_DIR" -czf "$TARBALL" "$NAME"
 rm -rf "$STAGE"
 

@@ -9,6 +9,14 @@ Given/When/Then scenarios, each of which names the test level that pins it. See
 (including the 2026-10-14 revisions that merged the MCP server into the daemon and added reactive,
 verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 
+## Releasing
+
+`CHANGELOG.md` is the release notes: every user-visible change gets a line in the upcoming version's
+section as part of the change itself, not at release time. `scripts/release-notes.sh <version>`
+prints a version's section; the release workflow publishes it as the GitHub release body and the
+Homebrew formula's caveats link to it. Bump the version in `build.gradle.kts`, the four
+`sandbox-kit/kits/*/spec.yaml` and `McpContext`'s server info together, then push the `v<version>` tag.
+
 ## Build & run
 
 ```bash
