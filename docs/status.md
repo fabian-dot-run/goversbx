@@ -1,7 +1,20 @@
 # Implementation status
 
-Snapshot as of 2026-10-15. This is the place to resume from. `docs/plan.md` has the full history
+Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
+
+## Spec-driven development; epic 0001 "project host set" (2026-10-23, spec only)
+
+From now on a feature starts as a spec under `docs/specs/` (convention: `docs/specs/README.md`;
+epic + shippable slices, Given/When/Then scenarios each tied to a test level). The first epic,
+`docs/specs/0001-project-host-set/`, lets a project declare its standard hosts in
+`.goversbx/network.yaml` (plus user-supplied profiles in `~/.config/goversbx/profiles/`) so a new
+sandbox gets them with one human decision instead of one request per host. Decision: the daemon
+resolves the file at sandbox registration and raises one host-set request (slice 1), the launcher
+becomes the trigger (slice 2), approved file hashes are pinned for auto-apply (slice 3). Shipped
+host lists are deliberately deferred (auto-updating lists are a supply-chain vector, frozen lists
+go stale while grants are permanent). **Next**: the user reviews `slice-1.md` and its four open
+questions; on `accepted`, implement slice 1 against its scenarios.
 
 ## E2E suite + nested sbx dev sandbox unblocked (2026-10-21, inner docker-sbx 0.49.1)
 

@@ -1,7 +1,10 @@
 # AGENTS.md
 
 Guidance for AI coding agents working in this repository. **Start with `docs/status.md`** - the
-current implementation state, what is and isn't verified, the next step, and open questions. See
+current implementation state, what is and isn't verified, the next step, and open questions.
+**Features are spec-driven**: a feature starts as a spec under `docs/specs/` (convention in
+`docs/specs/README.md`), is accepted by the user, and is implemented against the spec's
+Given/When/Then scenarios, each of which names the test level that pins it. See
 `README.md` for what the project does and `docs/plan.md` for the full design rationale and history
 (including the 2026-10-14 revisions that merged the MCP server into the daemon and added reactive,
 verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
