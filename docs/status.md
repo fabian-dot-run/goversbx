@@ -3,7 +3,16 @@
 Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-## Slice 1 of epic 0001 done (2026-10-23, e2e green on the host, not yet released)
+## v0.3.0 released (2026-10-23)
+
+Tag `v0.3.0` (commit be98004) ran the release workflow green on the macOS runner (check +
+`binaryTestNative`, so the native image has metadata for the new YAML/projecthosts paths), the GitHub
+release carries `goversbx-0.3.0-darwin-arm64.tar.gz`, and the tap formula points at it. Daemon, MCP
+server info and the four kits are 0.3.0. **Next**: `brew upgrade goversbx` + restart the host daemon
+(existing sandboxes keep working; a project file only takes effect for a sandbox registered after
+the restart, or via the explicit trigger), then slice 2 (launcher trigger).
+
+## Slice 1 of epic 0001 done (2026-10-23, e2e green on the host, released as v0.3.0)
 
 The e2e suite ran green on the user's macOS host against sbx 0.49.1 (27 passed, `ClaudeAgentTest`
 skipped as usual, 1m23s): the project file raised one set on re-registration, approval ran
