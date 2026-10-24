@@ -1,6 +1,6 @@
 # Epic 0001: Project host set
 
-Status: accepted (2026-10-23); slice 1 done, slice 2 next
+Status: accepted (2026-10-23); slice 1 done (v0.3.0), slice 2 draft (`slice-2.md`)
 
 ## Problem
 
