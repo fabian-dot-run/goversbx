@@ -9,7 +9,10 @@
 # bash 3.2 compatible (macOS), needs curl and java.
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/goversbx-launcher-test.XXXXXX")"
+# macOS's $TMPDIR ends in "/"; a doubled slash would make the paths printed here differ from the
+# normalized ones the daemon prints (first seen on the release runner).
+tmp_base="${TMPDIR:-/tmp}"; tmp_base="${tmp_base%/}"
+TMP="$(mktemp -d "$tmp_base/goversbx-launcher-test.XXXXXX")"
 export FAKE_SBX_STATE="$TMP/sbx" SBX="$REPO/scripts/testing/fake-sbx"
 export GOVERSBX_STATE_DIR="$TMP/state" XDG_CONFIG_HOME="$TMP/config" GOVERSBX_SBX_DRY_RUN=true
 export GOVERSBX_AUTO_OPEN_DASHBOARD=false
