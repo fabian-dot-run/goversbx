@@ -397,4 +397,21 @@ class ProjectHostSetTest {
         }
         return fail("no '" + event + "' event mentioning '" + contains + "' within 15s, got: " + lines);
     }
+
+    @Test
+    void theExplicitTriggerHasATextFormatForTheLauncher() {
+        Path ws = workspace(THREE_HOSTS);
+        FakeSbx sbx = FakeSbx.create().lsJson(ls(lsRow("proj-text", "ix", ws)));
+        try (DaemonProcess daemon = DaemonProcess.start(sbx)) {
+            daemon.tokenFor("proj-text");                       // registers -> the set is raised
+            HttpResponse<String> response = daemon.postJson(daemon.admin("/api/sandboxes/proj-text/host-set-requests?format=text"), "");
+            assertEquals(200, response.statusCode(), response.body());   // already pending since the registration
+            assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("text/plain"));
+            assertEquals("project host set (3 hosts from " + ws.resolve(".goversbx").resolve("network.yaml")
+                    + ") is waiting for approval in the dashboard\n", response.body());
+            HttpResponse<String> unknown = daemon.postJson(daemon.admin("/api/sandboxes/nope/host-set-requests?format=text"), "");
+            assertEquals(404, unknown.statusCode());
+            assertTrue(unknown.body().startsWith("sandbox 'nope' is not registered"), unknown.body());
+        }
+    }
 }

@@ -90,6 +90,11 @@ final class Sandbox {
         return sandbox;
     }
 
+    /** A sandbox someone else created (the launcher, in LauncherSequenceTest). */
+    static Sandbox existing(E2eConfig config, Sbx sbx, String name, String agent, Path kit, Path workspace) {
+        return new Sandbox(config, sbx, name, agent, kit, workspace, null);
+    }
+
     /**
      * {@code sbx create} only - no {@code sbx exec} afterwards, so the sandbox has never run a command
      * when this returns (what `goversbx run` sees between create and attach). Returns the sandbox and

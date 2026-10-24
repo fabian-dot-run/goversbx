@@ -1,6 +1,10 @@
 # Slice 2: the launcher triggers the host set
 
-Status: accepted (2026-10-24), the user took every proposal below; question 4 is verified first. Epic: `epic.md`. Builds on slice 1 (`slice-1.md`, done, v0.3.0).
+Status: implementing (2026-10-24). Question 4 verified on the host (sbx 0.49.1): YES - a secret set
+right after `sbx create` is substituted on the first call; the sandbox already reports `running`
+right after create. Launcher and daemon changes done, `launcher` scenarios 1-8 green in
+`./gradlew check`; e2e scenario 9 (`LauncherSequenceTest.theLauncherPutsTheSetInFrontOfTheHumanBeforeTheAgentRuns`)
+written, not yet run on a real sbx. Epic: `epic.md`. Builds on slice 1 (`slice-1.md`, done, v0.3.0).
 
 ## Problem
 
@@ -100,8 +104,17 @@ wired into `./gradlew check`. `e2e` is the existing suite against a real sbx.
 1. Name: parse `Created sandbox <name>` from `sbx create`, `sbx ls` diff as fallback.
 2. The register and trigger endpoints get `?format=text`; the launcher only prints lines.
 3. No waiting before attach in this slice.
-4. Verify first (e2e `LauncherSequenceTest`): does a secret set right after `sbx create`, before
-   the sandbox ever ran, get substituted? The answer decides the sequence.
+4. Verified (e2e `LauncherSequenceTest.aSecretSetRightAfterCreateIsSubstitutedOnTheFirstCall`):
+   yes, so the sequence is create -> register -> attach as specified.
+
+Amendments while implementing:
+
+- The launcher calls `register` (JSON, status only) and then `host-set-requests?format=text` for the
+  lines; only the trigger endpoint got the text format, since the set raised by the registration
+  shows up there as `ALREADY_PENDING` with the same "waiting for approval" line. `ALL_GRANTED`
+  prints one line too ("every host is already granted").
+- Scenario 9 runs the real launcher with a wrapper as its sbx that passes everything through but the
+  final `sbx run <name>` (which would attach an interactive agent).
 
 ## Open questions (as drafted)
 

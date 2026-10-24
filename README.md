@@ -142,7 +142,9 @@ if the daemon isn't running.
 
 `scripts/goversbx` builds the jar if it's missing or stale, starts the daemon in the background for
 real (`GOVERSBX_SBX_DRY_RUN=false` unless set; log and pid file in `~/.local/state/goversbx/`), waits
-for both health endpoints, and then hands over to `sbx run --kit sandbox-kit/kits/goversbx-<kit>`.
+for both health endpoints, creates the sandbox with `sbx create --kit sandbox-kit/kits/goversbx-<kit>`,
+registers it with the daemon so a project host set (see below) is already waiting in the dashboard,
+prints what is waiting, and then attaches with `sbx run <name>`.
 The daemon keeps running after the session ends - it serves every sandbox - until
 `scripts/goversbx stop`. For a sandbox that already exists it runs `sbx run` without `--kit` and
 tells you to recreate it if you want the kit (see below). All other `GOVERSBX_*` variables below pass

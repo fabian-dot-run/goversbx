@@ -4,7 +4,9 @@
 # host's sbx CLI and must stay outside the sandbox's control.
 #
 #   goversbx run [--goversbx-kit claude|pi|omp|opencode] [sbx run args...]
-#       Starts the daemon if it isn't running, then `sbx run --kit <kit> <args...>`.
+#       Starts the daemon if it isn't running, creates the sandbox (`sbx create --kit <kit> <args...>`),
+#       registers it with the daemon so the project's host set (.goversbx/network.yaml) is waiting
+#       in the dashboard, then attaches (`sbx run <name>`).
 #       Examples:  goversbx run claude ~/my-project
 #                  goversbx run --name my-sb claude ~/my-project
 #                  goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
@@ -168,6 +170,10 @@ sandbox_exists() { # $1 = name
   "$SBX" ls --format json 2>/dev/null | grep -q "\"name\": *\"$1\""
 }
 
+sandbox_names() { # every sandbox name `sbx ls` reports, one per line
+  "$SBX" ls --format json 2>/dev/null | grep -o '"name": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/'
+}
+
 # Name of the sandbox `sbx run <args>` refers to: the value of --name, else the first positional arg.
 target_sandbox() {
   local first=""
@@ -183,8 +189,48 @@ target_sandbox() {
   echo "$first"
 }
 
+name_flag() { # the value of --name, or nothing
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name) echo "${2:-}"; return ;;
+      --name=*) echo "${1#--name=}"; return ;;
+    esac
+    shift
+  done
+}
+
+admin_token() {
+  if [ -n "${GOVERSBX_ADMIN_TOKEN:-}" ]; then echo "$GOVERSBX_ADMIN_TOKEN"
+  elif [ -f "$STATE_DIR/admin-token" ]; then cat "$STATE_DIR/admin-token" 2>/dev/null; fi
+}
+
+# Spec 0001 slice 2: ask the daemon for the sandbox's project host set and print what it says. The
+# daemon formats the lines (?format=text); this only prints them. Never fails the caller: a problem
+# is one warning line, and slice 1's reactive registration remains the fallback.
+#   $1 = sandbox name, $2 = "register" to register it first (new sandbox), $3 = "quiet404"
+host_set_summary() {
+  local name="$1" token body code
+  token="$(admin_token)"
+  [ -n "$token" ] || { say "WARNING: no admin token in $STATE_DIR - project host set not requested now (it will be on the agent's first call)"; return 0; }
+  if [ "${2:-}" = register ]; then
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST -H "Authorization: Bearer $token" \
+      "$ADMIN/api/sandboxes/$name/register" 2>/dev/null)"
+    [ "$code" = 200 ] || { say "WARNING: could not register $name with the daemon (HTTP ${code:-none}) - project host set not requested now"; return 0; }
+  fi
+  body="$(curl -s -w '\n%{http_code}' --max-time 30 -X POST -H "Authorization: Bearer $token" \
+    "$ADMIN/api/sandboxes/$name/host-set-requests?format=text" 2>/dev/null)"
+  code="$(printf '%s\n' "$body" | tail -n 1)"
+  body="$(printf '%s\n' "$body" | sed '$d')"
+  case "$code" in
+    200|201|400) [ -z "$body" ] || printf '%s\n' "$body" | while IFS= read -r line; do say "$line"; done ;;
+    404) [ "${3:-}" = quiet404 ] || say "WARNING: the daemon does not know $name - project host set not requested now" ;;
+    *) say "WARNING: project host set not requested now (daemon answered HTTP ${code:-none})" ;;
+  esac
+  return 0
+}
+
 run_sandbox() {
-  local kit="${GOVERSBX_KIT:-claude}" kit_dir target
+  local kit="${GOVERSBX_KIT:-claude}" kit_dir target name before out status
   if [ "${1:-}" = --goversbx-kit ]; then kit="${2:?--goversbx-kit needs claude, pi, omp or opencode}"; shift 2; fi
   kit_dir="$KITS_DIR/goversbx-$kit"
   [ -f "$kit_dir/spec.yaml" ] || die "unknown kit '$kit' (no $kit_dir/spec.yaml)"
@@ -196,12 +242,32 @@ run_sandbox() {
   if [ -n "$target" ] && sandbox_exists "$target"; then
     say "sandbox $target already exists - starting it as-is, without the goversbx kit."
     say "To apply the kit, recreate it: sbx rm $target  &&  goversbx run <same args>  ('sbx kit add' can't apply goversbx kits - they ship files)."
+    # A changed project file raises its new hosts now; a sandbox the daemon never registered is skipped silently.
+    host_set_summary "$target" "" quiet404
     exec "$SBX" run "$@"
   fi
+
+  # New sandbox: create -> register (raises the project host set) -> attach, so the set is waiting in
+  # the dashboard before the agent starts (spec 0001 slice 2). Verified on sbx 0.49.1: a secret set
+  # right after `sbx create` is substituted on the sandbox's first call.
+  before="$(sandbox_names)"
   if [ "$SANDBOX_API_PORT" = 8787 ]; then
-    exec "$SBX" run --kit "$kit_dir" "$@"
+    out="$("$SBX" create --kit "$kit_dir" "$@" 2>&1)"; status=$?
+  else
+    out="$("$SBX" create --kit "$kit_dir" --kit-arg "goversbx-$kit.daemonPort=$SANDBOX_API_PORT" "$@" 2>&1)"; status=$?
   fi
-  exec "$SBX" run --kit "$kit_dir" --kit-arg "goversbx-$kit.daemonPort=$SANDBOX_API_PORT" "$@"
+  [ -z "$out" ] || printf '%s\n' "$out"
+  [ "$status" -eq 0 ] || exit "$status"
+
+  name="$(name_flag "$@")"
+  [ -n "$name" ] || name="$(printf '%s\n' "$out" | sed -n 's/.*Created sandbox \([^ ]*\).*/\1/p' | tail -n 1)"
+  [ -n "$name" ] || name="$(sandbox_names | grep -vxF "$before" | head -n 1)"
+  if [ -n "$name" ]; then
+    host_set_summary "$name" register
+    exec "$SBX" run "$name"
+  fi
+  say "WARNING: could not tell the new sandbox's name - project host set not requested now"
+  exec "$SBX" run "$@"
 }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift

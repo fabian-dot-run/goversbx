@@ -115,4 +115,31 @@ class ProjectHostSetControllerTest {
             assertTrue(unknown.body().string().contains("not registered"));
         });
     }
+
+    @Test
+    void textFormatPrintsReadyLinesForTheLauncher() throws Exception {
+        NetworkAccessService networkAccess = new NetworkAccessService(new InMemoryRequestRepository(),
+                (sandbox, host) -> new SbxPolicyPort.Result(true, "ok"));
+        ProjectHostSetService service = new ProjectHostSetService(ws -> switch (ws.toString()) {
+            case "/ok" -> Optional.of(new ResolvedHostSet(List.of("a.example", "b.example"), "/ok/.goversbx/network.yaml", List.of()));
+            case "/bad" -> throw new InvalidHostSetException("/bad/.goversbx/network.yaml", List.of("unknown key 'host'"));
+            default -> Optional.empty();
+        }, networkAccess);
+
+        JavalinTest.test(app(service, identity(new RegisteredSandbox("sb", "id", List.of("/ok", "/none", "/bad")))), (server, client) -> {
+            Response created = client.request("/api/sandboxes/sb/host-set-requests?format=text",
+                    b -> b.post(HttpRequest.BodyPublishers.ofString("")));
+            assertEquals(201, created.code());
+            assertEquals("""
+                    project host set (2 hosts from /ok/.goversbx/network.yaml) is waiting for approval in the dashboard
+                    /bad/.goversbx/network.yaml is invalid - no hosts requested:
+                      - unknown key 'host'
+                    """, created.body().string());
+
+            Response unknown = client.request("/api/sandboxes/nope/host-set-requests?format=text",
+                    b -> b.post(HttpRequest.BodyPublishers.ofString("")));
+            assertEquals(404, unknown.code());
+            assertTrue(unknown.body().string().contains("not registered"));
+        });
+    }
 }

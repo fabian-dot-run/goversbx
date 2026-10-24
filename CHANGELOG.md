@@ -4,6 +4,17 @@ All notable changes to goversbx. The section of a release is what `gh release cr
 its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at. Format after
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver (0.x: minor = feature).
 
+## Unreleased
+
+### Added
+
+- `goversbx run` raises the project host set before the agent starts: it creates the sandbox,
+  registers it with the daemon and prints what is waiting ("project host set (3 hosts from ...) is
+  waiting for approval in the dashboard", or the problems of an invalid file), then attaches. For an
+  existing sandbox it asks for hosts the file gained since. Nothing here blocks a session: problems
+  are one warning line, and the agent's first call still registers the sandbox as before.
+- `POST /api/sandboxes/{name}/host-set-requests?format=text`: the same evaluation as ready-to-print lines.
+
 ## 0.3.0 - 2026-10-23
 
 Project host sets: a project declares its standard hosts once, a new sandbox of it gets them with

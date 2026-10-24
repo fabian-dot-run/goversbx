@@ -3,6 +3,22 @@
 Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Slice 2 of epic 0001 implementing (2026-10-24, unreleased)
+
+Spec `docs/specs/0001-project-host-set/slice-2.md` (accepted, user took every proposal). Question 4
+verified on the host (sbx 0.49.1): a secret set right after `sbx create` is substituted on the first
+call (the sandbox is `running` right after create). Built: `goversbx run` for a new sandbox does
+`sbx create` -> `POST .../register` -> `POST .../host-set-requests?format=text` (lines printed as
+`goversbx: ...`) -> `exec sbx run <name>`; name from `--name`, else parsed from "Created sandbox
+<name>", else an `sbx ls` diff; an existing sandbox gets the trigger (404 silent) before attaching;
+nothing ever blocks the session. Daemon: `?format=text` on the trigger endpoint (unit + contract
+test). New test level `launcher`: `scripts/testing/test-launcher.sh` (fake-sbx now names sandboxes
+like sbx, records workspaces and calls, `FAKE_SBX_CREATE_FAIL`), wired into `check` as
+`:daemon:launcherTest`, 9 checks green. **Next**: run
+`./gradlew :daemon:e2eTest --tests 'run.fabian.daemon.e2e.LauncherSequenceTest'` on the host
+(scenario 9, real launcher with a no-attach sbx wrapper; set host must be blocked), then set the spec
+to done and release 0.4.0 (CHANGELOG "Unreleased" is written).
+
 ## v0.3.0 released (2026-10-23)
 
 Tag `v0.3.0` (commit be98004) ran the release workflow green on the macOS runner (check +

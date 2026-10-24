@@ -13,30 +13,41 @@
 # Keep SKIP_CLAUDE=1: the Claude step would modify the real ~/.claude.json of whoever runs it.
 STATE="${FAKE_SBX_STATE:?}"
 mkdir -p "$STATE"
+touch "$STATE/sandboxes"
+printf '%s\n' "$*" >> "$STATE/calls.log"     # every invocation, for order checks (test-launcher.sh)
 cmd="$1"; shift
 case "$cmd" in
   create|run)
     # `run` additionally prints the args it got (stands in for attaching to the agent).
     [ "$cmd" = run ] && echo "fake sbx run args: $*"
+    # FAKE_SBX_CREATE_FAIL=1 makes `create` fail the way sbx does when it can't create a sandbox.
+    if [ "$cmd" = create ] && [ -n "${FAKE_SBX_CREATE_FAIL:-}" ]; then echo "error: fake create failure"; exit 3; fi
     # `--kit DIR` is only checked for a spec.yaml; the kit itself (MCP registration, network
     # allow-list) is not emulated - the daemon is reached on localhost without a policy anyway.
+    name=""; agent=""; ws=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) name="$2"; shift 2 ;;
         --kit) [ -f "$2/spec.yaml" ] || { echo "error: no spec.yaml in kit $2"; exit 1; }; shift 2 ;;
         --kit-arg) shift 2 ;;
-        *) shift ;;
+        -*) shift ;;
+        *) if [ -z "$agent" ]; then agent="$1"; elif [ -z "$ws" ]; then ws="$1"; fi; shift ;;
       esac
     done
-    [ -n "${name:-}" ] || { [ "$cmd" = run ] && exit 0; }
-    echo "$name" >> "$STATE/sandboxes"; echo "created $name" ;;
+    # `run <existing name>` attaches; nothing to create.
+    [ "$cmd" = run ] && grep -qx "$agent" "$STATE/sandboxes" && exit 0
+    # Like sbx: without --name the sandbox is named <agent>-<workspace dir name>.
+    [ -n "$name" ] || { [ "$cmd" = run ] && [ -z "$ws" ] && exit 0; name="$agent-$(basename "${ws:-$PWD}")"; }
+    echo "$name" >> "$STATE/sandboxes"; [ -n "$ws" ] && echo "$ws" > "$STATE/ws-$name"
+    echo "✓ Created sandbox $name" ;;
   kit)
     [ "$1" = validate ] && [ -f "$2/spec.yaml" ] || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }
     echo "kit $2 looks valid (fake: only checks for spec.yaml)" ;;
   ls)
     printf '['; first=1
     while read -r n; do [ $first = 1 ] || printf ','; first=0
-      printf '{"name":"%s","id":"x","agent":"claude","status":"running","workspaces":[],"created_at":"2026-10-14T00:00:00Z"}' "$n"
+      w="[]"; [ -f "$STATE/ws-$n" ] && w="[\"$(cat "$STATE/ws-$n")\"]"
+      printf '{"name":"%s","id":"id-%s","agent":"claude","status":"running","workspaces":%s,"created_at":"2026-10-14T00:00:00Z"}' "$n" "$n" "$w"
     done < "$STATE/sandboxes"; echo ']' ;;
   exec)
     envs=()

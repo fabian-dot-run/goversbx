@@ -107,7 +107,21 @@ registerBinaryTest("binaryTestNative", "Contract tests against the native binary
     inputs.file(nativeBinary)
 }
 
-tasks.named("check") { dependsOn(binaryTestJar) }
+// Launcher tests (scripts/testing/test-launcher.sh, spec 0001 slice 2): scripts/goversbx `run` against
+// scripts/testing/fake-sbx and this jar in dry-run, on free ports with a temp state dir.
+val launcherTest = tasks.register<Exec>("launcherTest") {
+    group = "verification"
+    description = "Launcher tests: scripts/goversbx run against fake-sbx and the daemon jar (dry-run)."
+    dependsOn(tasks.shadowJar)
+    inputs.file(fatJar)
+    inputs.dir(rootProject.layout.projectDirectory.dir("scripts"))
+    workingDir = rootProject.projectDir
+    commandLine("bash", "scripts/testing/test-launcher.sh")
+    // A proxied JVM (inside a dev sandbox) must not route the daemon's own loopback calls via the proxy.
+    environment.remove("JAVA_TOOL_OPTIONS")
+}
+
+tasks.named("check") { dependsOn(binaryTestJar, launcherTest) }
 
 // End-to-end suite against a REAL sbx (src/e2eTest): starts the daemon jar for real
 // (GOVERSBX_SBX_DRY_RUN=false), creates throwaway sandboxes with the kits, and checks every link of
