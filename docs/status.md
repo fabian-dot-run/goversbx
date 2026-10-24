@@ -3,7 +3,15 @@
 Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-## Slice 2 of epic 0001 implementing (2026-10-24, unreleased)
+## v0.4.0: slice 2 of epic 0001 done (2026-10-24)
+
+e2e scenarios 9 and 10 green on the host (real launcher with a no-attach sbx wrapper: the set was
+pending before the sandbox's first MCP call, approval made example.com reachable, the agent's request
+was approved at once). Fix after the run: the launcher tees `sbx create`'s output so its progress is
+live. Released as 0.4.0. **Next**: slice 3 (trust on first use: hash-pinned auto-apply) needs its
+spec first.
+
+## Slice 2 of epic 0001 implementing (2026-10-24, superseded by the entry above)
 
 Spec `docs/specs/0001-project-host-set/slice-2.md` (accepted, user took every proposal). Question 4
 verified on the host (sbx 0.49.1): a secret set right after `sbx create` is substituted on the first

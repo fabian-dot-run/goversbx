@@ -251,12 +251,15 @@ run_sandbox() {
   # the dashboard before the agent starts (spec 0001 slice 2). Verified on sbx 0.49.1: a secret set
   # right after `sbx create` is substituted on the sandbox's first call.
   before="$(sandbox_names)"
+  # sbx's progress (image pull, kit install) is shown live and kept for the name lookup below.
+  mkdir -p "$STATE_DIR"
+  local create_log="$STATE_DIR/create.$$.log"
   if [ "$SANDBOX_API_PORT" = 8787 ]; then
-    out="$("$SBX" create --kit "$kit_dir" "$@" 2>&1)"; status=$?
+    "$SBX" create --kit "$kit_dir" "$@" 2>&1 | tee "$create_log"; status=${PIPESTATUS[0]}
   else
-    out="$("$SBX" create --kit "$kit_dir" --kit-arg "goversbx-$kit.daemonPort=$SANDBOX_API_PORT" "$@" 2>&1)"; status=$?
+    "$SBX" create --kit "$kit_dir" --kit-arg "goversbx-$kit.daemonPort=$SANDBOX_API_PORT" "$@" 2>&1 | tee "$create_log"; status=${PIPESTATUS[0]}
   fi
-  [ -z "$out" ] || printf '%s\n' "$out"
+  out="$(cat "$create_log" 2>/dev/null)"; rm -f "$create_log"
   [ "$status" -eq 0 ] || exit "$status"
 
   name="$(name_flag "$@")"

@@ -1,10 +1,10 @@
 # Slice 2: the launcher triggers the host set
 
-Status: implementing (2026-10-24). Question 4 verified on the host (sbx 0.49.1): YES - a secret set
-right after `sbx create` is substituted on the first call; the sandbox already reports `running`
-right after create. Launcher and daemon changes done, `launcher` scenarios 1-8 green in
-`./gradlew check`; e2e scenario 9 (`LauncherSequenceTest.theLauncherPutsTheSetInFrontOfTheHumanBeforeTheAgentRuns`)
-written, not yet run on a real sbx. Epic: `epic.md`. Builds on slice 1 (`slice-1.md`, done, v0.3.0).
+Status: done (2026-10-24), released in 0.4.0. Question 4 verified on the host (sbx 0.49.1): a
+secret set right after `sbx create` is substituted on the first call; the sandbox already reports
+`running` right after create. `launcher` scenarios 1-8 green in `./gradlew check`; e2e scenarios 9
+and 10 (`LauncherSequenceTest`) green on the host. After the e2e run the launcher streams
+`sbx create`'s progress live (tee) instead of printing it only once create finished.
 
 ## Problem
 

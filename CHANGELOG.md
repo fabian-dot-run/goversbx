@@ -4,7 +4,9 @@ All notable changes to goversbx. The section of a release is what `gh release cr
 its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at. Format after
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver (0.x: minor = feature).
 
-## Unreleased
+## 0.4.0 - 2026-10-24
+
+The project host set now waits in the dashboard before the agent starts. Verified end to end against sbx 0.49.1.
 
 ### Added
 
@@ -14,6 +16,15 @@ its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at.
   existing sandbox it asks for hosts the file gained since. Nothing here blocks a session: problems
   are one warning line, and the agent's first call still registers the sandbox as before.
 - `POST /api/sandboxes/{name}/host-set-requests?format=text`: the same evaluation as ready-to-print lines.
+
+### Changed
+
+- `goversbx run` now runs `sbx create` and then `sbx run <name>` instead of one `sbx run`; sbx's
+  create progress is shown live as before.
+
+### Upgrading
+
+`brew upgrade goversbx`, then restart the daemon. Existing sandboxes need nothing.
 
 ## 0.3.0 - 2026-10-23
 

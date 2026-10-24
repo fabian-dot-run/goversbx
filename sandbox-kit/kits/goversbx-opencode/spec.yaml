@@ -1,7 +1,7 @@
 schemaVersion: "2"
 kind: mixin
 name: goversbx-opencode
-version: "0.3.0"
+version: "0.4.0"
 displayName: goversbx network access (opencode)
 description: >-
   Lets opencode request outbound network access through the goversbx daemon running on the host,
