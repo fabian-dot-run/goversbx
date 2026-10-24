@@ -1,14 +1,41 @@
 # Implementation status
 
-Snapshot as of 2026-10-23. This is the place to resume from. `docs/plan.md` has the full history
+Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
+
+## Epic 0002 drafted: `goversbx-omp` as a kit v3 mixin (2026-10-24)
+
+`docs/specs/0002-goversbx-omp-kit-v3/` (`epic.md` + `slice-1.md`), **draft, awaiting acceptance**;
+nothing implemented. Why: two blockers proven against a real sbx 0.49.1 host, both properties of the
+v2 kit *form* - (A) a v2 kit in the composition wipes every v3 mixin's image content (the omp-sbx
+oMLX extension silently disappears next to `goversbx-omp`, in either order; the sbx binary says
+"mixin composition is accepted in the schema but not yet applied by the runtime"), and (B) a kit
+that ships `files/home/.omp/**` cannot coexist with a host-mounted `~/.omp` - `sbx create` dies with
+`error: failed to run sandbox container`, which is exactly what `omp-sbx` mounts. Full evidence and
+minimal repros: `docs/handoff-goversbx-omp-v3.md`.
+
+Three facts measured today that changed the shape of the port (epic's Evidence table):
+**descriptor filename is free in v3** (any root `*.yaml` with `schemaVersion: "3"` is picked up;
+v2 needs `spec.yaml`/`spec.yml` - `sbx kit validate <dir> --offline` probes), so the descriptor is
+`goversbx-omp.yaml` and `--kit-arg goversbx-omp.daemonPort=…` keeps working unchanged; **the
+offline path cannot validate a v3 kit** ("v3 source kit … no kit builder configured"), so the first
+`sbx kit validate` of the ported kit is also this host's first kit build (`sbx-kit-builder`, not
+created yet); and **v3 has no `environment:` block** - the two `GOVERSBX_DAEMON_*` vars move to
+`args.<name>.env`, which scenario S4 pins on a real sandbox.
+
+**Next**: user accepts the spec (five open questions in `epic.md`: env mapping, descriptor name,
+the skill write onto the host's `~/.omp`, reporting blocker A upstream, version 0.5.0), then
+slice 1.
 
 ## v0.4.0: slice 2 of epic 0001 done (2026-10-24)
 
 e2e scenarios 9 and 10 green on the host (real launcher with a no-attach sbx wrapper: the set was
 pending before the sandbox's first MCP call, approval made example.com reachable, the agent's request
 was approved at once). Fix after the run: the launcher tees `sbx create`'s output so its progress is
-live. Released as 0.4.0. **Next**: slice 3 (trust on first use: hash-pinned auto-apply) needs its
+live. Released as 0.4.0 (published 2026-10-24, release notes from CHANGELOG for the first time, tap
+updated). The first tag run failed in `launcherTest` on the macOS runner: its `$TMPDIR` ends in "/",
+so the test's paths had a doubled slash the daemon normalizes away (b691ac7 fixes the test, the
+launcher was fine); the tag was moved to that commit since nothing had been published. **Next**: slice 3 (trust on first use: hash-pinned auto-apply) needs its
 spec first.
 
 ## Slice 2 of epic 0001 implementing (2026-10-24, superseded by the entry above)
