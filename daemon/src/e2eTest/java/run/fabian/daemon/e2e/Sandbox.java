@@ -90,6 +90,21 @@ final class Sandbox {
         return sandbox;
     }
 
+    /**
+     * {@code sbx create} only - no {@code sbx exec} afterwards, so the sandbox has never run a command
+     * when this returns (what `goversbx run` sees between create and attach). Returns the sandbox and
+     * sbx's create output.
+     */
+    static Sandbox createWithoutStart(E2eConfig config, Sbx sbx, String name, String agent, Path kit, Path workspace,
+                                      StringBuilder createOutput) {
+        Sbx.Result result = sbx.run(Duration.ofMinutes(15), createArgs(config, name, agent, kit, workspace));
+        if (!result.ok()) {
+            fail("sbx create " + name + " failed:\n" + result.output());
+        }
+        createOutput.append(result.output());
+        return new Sandbox(config, sbx, name, agent, kit, workspace, null);
+    }
+
     private static List<String> createArgs(E2eConfig config, String name, String agent, Path kit, Path workspace) {
         List<String> args = new ArrayList<>(List.of("create", "--no-progress", "--kit", kit.toString()));
         if (config.sandboxApiPort != 8787) {              // the kits default to 8787

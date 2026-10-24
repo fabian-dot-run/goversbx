@@ -1,6 +1,6 @@
 # Slice 2: the launcher triggers the host set
 
-Status: draft (2026-10-24). Epic: `epic.md`. Builds on slice 1 (`slice-1.md`, done, v0.3.0).
+Status: accepted (2026-10-24), the user took every proposal below; question 4 is verified first. Epic: `epic.md`. Builds on slice 1 (`slice-1.md`, done, v0.3.0).
 
 ## Problem
 
@@ -95,7 +95,15 @@ wired into `./gradlew check`. `e2e` is the existing suite against a real sbx.
     `sbx create` (sandbox created, maybe stopped) is substituted once the session runs: the first
     MCP call resolves without "please retry". `e2e`
 
-## Open questions (settle before `accepted`)
+## Decisions (2026-10-24)
+
+1. Name: parse `Created sandbox <name>` from `sbx create`, `sbx ls` diff as fallback.
+2. The register and trigger endpoints get `?format=text`; the launcher only prints lines.
+3. No waiting before attach in this slice.
+4. Verify first (e2e `LauncherSequenceTest`): does a secret set right after `sbx create`, before
+   the sandbox ever ran, get substituted? The answer decides the sequence.
+
+## Open questions (as drafted)
 
 1. **Name without `--name`.** Options: (a) parse `✓ Created sandbox <name>` from `sbx create`'s
    output; (b) diff `sbx ls` before/after; (c) make `--name` mandatory for `goversbx run` and
