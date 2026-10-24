@@ -100,6 +100,12 @@ Option B, one kit, one slice:
   attaching `goversbx-claude`, `goversbx-pi` or `goversbx-opencode` next to a v3 kit still
   triggers blocker A for that v3 kit, so a composition like omp-sbx's has to point at
   `goversbx-omp` and at no other goversbx kit.
+- **The launcher now refuses this kit.** `omp-sbx` checks the kit form statically before
+  `sbx create` (commit db15c91 in `~/IdeaProjects/omp-sbx`): a kit staging into `~/.omp` is
+  refused with the path and the fix, a v2 kit beside a v3 mixin warns and names the mixin that
+  loses its files. So `OMP_SBX_EXTRA_KITS=…/goversbx-omp` fails fast today, by design, with a
+  message pointing at exactly this port - which is the argument for not leaving it open-ended.
+  `OMP_SBX_ALLOW_HOME_OMP_KIT=1` exists as the escape hatch; using it is not the recommendation.
 
 ## Slices
 
