@@ -32,17 +32,28 @@ Geändert: `omp-sbx`, `sbx-preflight.sh` (`normalize_kit_ref`, `recorded_kits`,
 ## Entscheidung
 
 Option 1: `sandbox-kit/kits/goversbx-omp` auf `schemaVersion: "3"` portieren —
-`kit.yaml` + `kit.dockerfile`, Payload nach `/opt/goversbx/` (außerhalb von `$HOME` und
-außerhalb aller Pfade, die der omp-Workload anlegt), Skill-Installation zur Laufzeit durch
-`register-omp-mcp.sh`. Andere Kits bleiben v2.
+`goversbx-omp.yaml` + `goversbx-omp.dockerfile`, Payload nach `/opt/goversbx/` (außerhalb von
+`$HOME` und außerhalb aller Pfade, die der omp-Workload anlegt), Skill-Installation zur Laufzeit
+durch `register-omp-mcp.sh`. Andere Kits bleiben v2.
 
 ## Nächster Schritt
 
-1. Spec unter `docs/specs/` (AGENTS.md-Konvention) mit vier Szenarien: Komposition mit
-   v3-Content-Kit, `~/.omp` als Host-Mount, Skill + `mcp.json` im laufenden Sandbox,
-   `sbx kit add` weiterhin verweigert.
-2. Port: `kit.yaml`, `kit.dockerfile`, `.dockerignore`, `stage/opt/goversbx/…`; `spec.yaml` und
-   `files/` erst nach Gradle- und Skript-Umstellung löschen.
+**Spec ist geschrieben (2026-10-24): `docs/specs/0002-goversbx-omp-kit-v3/` — `epic.md` +
+`slice-1.md`, Status `draft`. Erledigt ist damit Schritt 1; nichts implementiert.** Wartet auf
+Abnahme durch den User (Repo-Regel: Spec-Abnahme durch den User, nicht durch den Agenten). Fünf
+Punkte in `epic.md` §"Open questions" brauchen eine Antwort, u. a. ob `version` im
+v3-Deskriptor bleibt und ob der Skill-Schreibzugriff auf das gemountete Host-`~/.omp` so ok ist.
+
+Zwei Annahmen aus diesem Dokument sind durch Messung ersetzt (Details in `epic.md`, Evidence):
+Der Deskriptor heißt **`goversbx-omp.yaml`**, nicht `kit.yaml` — v3 akzeptiert jedes Root-`*.yaml`
+mit `schemaVersion: "3"` (Name = Dateistamm, `--kit-arg goversbx-omp.…` bleibt also), v2
+verlangt `spec.yaml`. Und `sbx kit validate --offline` kann v3 **nicht** prüfen ("no kit builder
+configured") — der erste echte Schema-Check läuft über das `sbx-kit-builder`-Sandbox, das auf
+diesem Host noch nicht existiert.
+
+1. Abnahme der Spec (`docs/specs/0002-goversbx-omp-kit-v3/`).
+2. Port: `goversbx-omp.yaml`, `goversbx-omp.dockerfile`, `.dockerignore`, `stage/opt/goversbx/…`;
+   `spec.yaml` und `files/` erst nach Gradle- und Skript-Umstellung löschen.
 3. `sandbox-kit/build.gradle.kts`: `kitSkillDirs["goversbx-omp"]` → `stage/opt/goversbx/skills`.
 4. `scripts/e2e-omp.sh` Schritt 0 und 5 anpassen + neuer Schritt, dass **beide** Dateien
    (`/opt/goversbx/register-omp-mcp.sh` und `/opt/omp-sbx/extensions/omlx-provider.ts`) in einem

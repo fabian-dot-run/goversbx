@@ -82,13 +82,20 @@ Target: /usr/share/sandbox/kit/probe-skills/skills
 
 ```
 sandbox-kit/kits/goversbx-omp/
-├── kit.yaml                    # v3 descriptor (schemaVersion "3", kind: mixin)
-├── kit.dockerfile            # stages script + skill into the image
-├── .dockerignore             # allow-list: kit.yaml, kit.dockerfile, stage/**
+├── goversbx-omp.yaml           # v3 descriptor (schemaVersion "3", kind: mixin) - name comes from the stem
+├── goversbx-omp.dockerfile     # stages script + skill into the image
+├── .dockerignore               # allow-list: the two files above + stage/**
 └── stage/opt/goversbx/
     ├── register-omp-mcp.sh
     └── skills/goversbx-network-access/SKILL.md
 ```
+
+Measured 2026-10-24 (`sbx kit validate <dir> --offline`, sbx v0.49.1): in v3 the descriptor's
+filename is **free** - any root `*.yaml` carrying `schemaVersion: "3"` is picked up (`foo.yaml`,
+`kit.yaml`, `goversbx-omp.yaml` all trigger the v3 path), while v2 strictly needs
+`spec.yaml`/`spec.yml` (`error: artifact: spec.yaml (or spec.yml) is required`). So the port names
+it `goversbx-omp.yaml`, matching the directory stem (how omp-sbx does it: `omp.yaml`,
+`omlx-mixin.yaml`) and keeping `--kit-arg goversbx-omp.daemonPort=…` spelled exactly as today.
 
 Rationale for `/opt/goversbx/`: outside `$HOME` (blocker B), outside anything the omp workload
 kit names (blocker A's directory-entry hazard), and readable by the agent when `chmod -R a+rX`
@@ -112,12 +119,14 @@ AGENTS.md §"Sandbox kit".
 
 ## 4. Steps
 
-1. `docs/specs/` — this is a user-visible kit change, so it wants a spec first (convention in
-   `docs/specs/README.md`). Scenarios to pin: (a) kit composes with another v3 mixin that ships
-   content, (b) kit applies when `~/.omp` is a host mount, (c) skill + mcp.json present in the
-   running sandbox, (d) `sbx kit add` still refused / recreate still needed.
-2. Add `kit.yaml` + `kit.dockerfile` + `.dockerignore`, move the two payload files to `stage/`.
-   Delete `spec.yaml` and `files/` **only after** gradle and the e2e script are updated.
+1. ~~`docs/specs/`~~ **done 2026-10-24**: `docs/specs/0002-goversbx-omp-kit-v3/` (`epic.md` +
+   `slice-1.md`, status `draft`, awaiting acceptance). Scenarios S1-S9 cover the four above plus
+   the env mapping, the packaged zip and the no-payload case; the slice also states the two new
+   test levels a kit needs (`e2e` via `scripts/e2e-omp.sh`, `build` via gradle +
+   `sbx kit validate --offline`, which for v3 can only report "no kit builder configured").
+2. Add `goversbx-omp.yaml` + `goversbx-omp.dockerfile` + `.dockerignore`, move the two payload
+   files to `stage/`. Delete `spec.yaml` and `files/` **only after** gradle and the e2e script are
+   updated.
 3. `sandbox-kit/build.gradle.kts` — `kitSkillDirs` maps `goversbx-omp` to
    `files/home/.omp/agent/skills`; point it at `stage/opt/goversbx/skills` so `syncKitSkills`
    and `verifyKitSkills` keep working. Keep the other three entries unchanged.
@@ -168,8 +177,10 @@ probe sandbox is not the real working setup.
 1. v3 key for kit env vars (`environment.variables` was v2) — confirm against
    `docker/sbx-kits-contrib` `SPEC-v3.md` before dropping the mapping; the register script reads
    `GOVERSBX_DAEMON_HOST/_PORT` and currently gets them from the kit.
-2. Keep the kit descriptor filename as `kit.yaml` or keep `spec.yaml`? sbx normalizes both to
-   `kit.yaml` in the sandbox; `packageKits` and the release checklist assume `spec.yaml`.
+2. ~~Keep the kit descriptor filename as `kit.yaml` or keep `spec.yaml`?~~ **Answered by
+   measurement**: v3 takes any root `*.yaml` name (the stem is the kit name), v2 needs `spec.yaml`.
+   Decided `goversbx-omp.yaml`; `packageKits`' `from("kits/$kit")` is unchanged, only its comment
+   and the release checklist's "four `kits/*/spec.yaml`" change.
 3. Should `goversbx-pi` be ported in the same change? It ships `files/home/.agents/skills/`
    (not `~/.omp`), so it has blocker A but not B.
 4. Whether to report blocker A to Docker as a bug (the runtime string says composition is "not
