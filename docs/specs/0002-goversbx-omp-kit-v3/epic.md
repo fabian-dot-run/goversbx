@@ -1,6 +1,34 @@
 # Epic 0002: goversbx-omp as a sbx kit v3 mixin
 
-Status: draft (2026-10-24) - awaiting acceptance; no slice started
+Status: draft (2026-10-24) - **superseded in part, see amendment below**; no slice started
+
+## Amendment (2026-10-26) - blocker B no longer applies
+
+The `omp-sbx` launcher was deleted (`omp-sbx` commit `ddc2bf1`). It no longer mounts
+the host `~/.omp` into the sandbox - each sandbox owns its own `~/.omp`, seeded from
+the image. That removes the premise of blocker B:
+
+- **Verified, not assumed**: a v2 kit shipping `files/home/.omp/agent/skills/probe/SKILL.md`
+  creates fine and stages the file at `/home/agent/.omp/agent/skills/probe/SKILL.md`,
+  with `/proc/mounts` showing no `~/.omp` entry. Previously this failed at create with
+  `error: failed to run sandbox container`.
+- Consequence for the option matrix below: **option C's `✗ (B)` no longer holds**, and
+  option A's rejection loses one of its two legs.
+- **Blocker A still stands, and was retested on v0.49.2** (this spec measured v0.49.1):
+  with a v2 kit attached, `/opt/omp-sbx/extensions/omlx-provider.ts` is absent while the
+  v2 kit's own files land. So *if* goversbx ships a kit and composes with `omlx-mixin`,
+  that kit still has to be v3.
+
+What this opens up, and may make this epic moot: sbx now covers both payloads natively.
+Skills come from the shared store (`sbx skills add` / `import`), and `omp-sbx` declares
+`agent-skills@1` at `~/.omp/agent/skills` so they arrive read-only without any kit
+`files/`. MCP servers come from `sbx mcp add --url … --header …` + `--static-mcp`, and
+`omp-init.sh` already points omp at the sandbox's `MCP_GATEWAY_URL`. If both hold - the
+unverified part is whether the gateway forwards the `X-Goversbx-Sandbox-Name` placeholder -
+then `goversbx-omp` needs no kit at all, and there is nothing here to port.
+
+The original analysis stays below as the record of what was measured and why the options
+were ranked as they were.
 
 ## Problem
 
@@ -141,13 +169,19 @@ Option B, one kit, one slice:
 2. **Descriptor name.** `goversbx-omp.yaml` as decided above, or `kit.yaml`? Only the release
    checklist and `packageKits`' comment care; `--kit-arg` spelling resolves to `goversbx-omp`
    either way (directory basename == descriptor stem).
-3. **Skill write onto the host's `~/.omp`.** omp-sbx mounts the host's real `~/.omp`, so the
-   startup skill install (and the existing `mcp.json` merge) modify the host config and stay there
-   after the sandbox is gone. Options: (a) accept it and document it, (b) have the script skip the
-   skill copy when `<agentDir>` is a mountpoint, (c) set `OMP_AGENT_DIR` to a sandbox-local path
-   in the kit's lifecycle env. (a) is what this spec assumes - it is the least surprising for a
-   kit whose whole job is to configure omp.
+3. ~~**Skill write onto the host's `~/.omp`.**~~ **Void as of 2026-10-26.** omp-sbx no longer
+   mounts the host `~/.omp` (launcher deleted, commit `ddc2bf1` in that repo), so the startup skill
+   install and the `mcp.json` merge write into the sandbox's own config dir and die with it. Options
+   (b) and (c) are moot; the remaining choice is whether the skill is shipped by the kit at all,
+   or comes from the native skills store via `agent-skills@1`.
 4. **Blocker A upstream report**: yes/no, and if yes, who files it (us, with the kit pair from
-   `docs/handoff-goversbx-omp-v3.md` §1).
+   `docs/handoff-goversbx-omp-v3.md` §1). Confirmed still reproducing on v0.49.2, so it is not a
+   stale report.
 5. **Version**: 0.5.0 for slice 1 (kit format is user-visible), or fold it into the next release
    that has features?
+6. **New, and it may supersede 1-5**: does the MCP gateway forward the `X-Goversbx-Sandbox-Name`
+   placeholder to the daemon? If yes, skills come from the native store and MCP from
+   `sbx mcp add` + `--static-mcp`, `goversbx-omp` ships no kit, and this epic closes with no port.
+   Register on the host with `sbx mcp add goversbx-network --url http://127.0.0.1:8787/mcp
+   --header "X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1"` and check what the
+   daemon receives.

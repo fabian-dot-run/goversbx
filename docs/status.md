@@ -3,6 +3,29 @@
 Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Update 2026-10-26: the omp-sbx launcher was deleted, blocker B went with it
+
+`~/IdeaProjects/omp-sbx` commit `ddc2bf1` removed `omp-sbx`, `omp-sbxenv`,
+`omp-sbx-mcp-import` and `sbx-preflight.sh` (~1330 of 2400 lines). They all existed to defend a
+shared host `~/.omp` mounted into every sandbox; that mount is gone, so each sandbox owns its own
+`~/.omp`, seeded from the kit image. Native `sbx` covers what the launcher hand-rolled - naming
+(`omp-<basename>`), config layering (`~/.sbxenv.yaml` merged beneath `./sbxenv.yaml`, verified),
+and skills (shared store mounted read-only via `agent-skills@1`).
+
+Measured on sbx **v0.49.2**, not inferred:
+
+- **Blocker B no longer applies.** A v2 kit shipping `files/home/.omp/**` stages cleanly when
+  nothing mounts the host `~/.omp`. Its rejection of option C in spec 0002 is void - see the
+  amendment at the top of `docs/specs/0002-goversbx-omp-kit-v3/epic.md`.
+- **Blocker A still stands**, retested on 0.49.2: with a v2 kit attached, `omlx-provider.ts` is
+  absent while the v2 kit's own files land. So a kit that composes with `omlx-mixin` must still
+  be v3.
+
+That leaves one question deciding whether this epic survives at all: **does the MCP gateway
+forward the `X-Goversbx-Sandbox-Name` placeholder?** If it does, skills via the native store plus
+MCP via `sbx mcp add` / `--static-mcp` mean `goversbx-omp` needs no kit, and spec 0002 closes
+without a port. Status stays draft until then.
+
 ## Epic 0002 drafted: `goversbx-omp` as a kit v3 mixin (2026-10-24)
 
 `docs/specs/0002-goversbx-omp-kit-v3/` (`epic.md` + `slice-1.md`), **draft, awaiting acceptance**;

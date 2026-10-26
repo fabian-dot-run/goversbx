@@ -1,78 +1,84 @@
 # Handoff (kurz) — goversbx-omp auf sbx kit v3
 
-2026-10-24 · Details, Beweismatrix und Verifikationsblock: [`handoff-goversbx-omp-v3.md`](handoff-goversbx-omp-v3.md)
+2026-10-26 · Details, Beweismatrix und Verifikationsblock: [`handoff-goversbx-omp-v3.md`](handoff-goversbx-omp-v3.md)
 
-## Stand omp-sbx (`~/IdeaProjects/omp-sbx`, uncommitted, Tests grün)
+## Was sich am 2026-10-26 geändert hat
 
-Extra-kits support: `--kit` / `--kit-arg` (wird vom Launcher konsumiert, nicht an omp
-durchgereicht), `OMP_SBX_EXTRA_KITS` + `OMP_SBX_EXTRA_KIT_ARGS` aus `.env` oder exportierter
-Umgebung (exported wins, exported-leer entfernt das Projekt-Kit), `~`-Expansion,
-Pfad-Validierung vor dem Create, Dupes collapse, kit-args last-one-wins pro Name,
-Mixin-Drift-Warnung (`not attached` / `still attached` → `--new`), `--dry-run`.
+**Der omp-sbx-Launcher ist gelöscht** (`~/IdeaProjects/omp-sbx` commit `ddc2bf1`):
+`omp-sbx`, `omp-sbxenv`, `omp-sbx-mcp-import`, `sbx-preflight.sh` — ~1330 von 2400 Zeilen.
+Sie existierten, um das gemountete Host-`~/.omp` zu verteidigen. Dieser Mount ist weg;
+jedes Sandbox hat sein eigenes `~/.omp` aus dem Image.
 
-Geändert: `omp-sbx`, `sbx-preflight.sh` (`normalize_kit_ref`, `recorded_kits`,
-`kit_mixin_drift`, `list_contains`), `omp-sbxenv`, `test-kit.sh` (neue Sektion
-*launcher kit wiring* + `TEST_SKIP_SANDBOX=1`), `README.md`.
-`kits/omlx-mixin/` ist wieder auf HEAD — sein Dockerfile-Staging funktioniert.
+Das entwertet **Blocker B** — gemessen, nicht gefolgert: ein v2-Kit mit
+`files/home/.omp/agent/skills/probe/SKILL.md` legt die Datei sauber ab, `/proc/mounts` zeigt
+keinen `~/.omp`-Eintrag. Vorher: `error: failed to run sandbox container`.
 
-`TEST_SKIP_SANDBOX=1 ./test-kit.sh` → 24 passed, 0 failed.
+**Blocker A besteht weiter und wurde auf v0.49.2 nachgemessen** (dieses Dokument mass vorher
+auf v0.49.1; der Host ist inzwischen 0.49.2): mit v2-Kit in der Komposition fehlt
+`/opt/omp-sbx/extensions/omlx-provider.ts`, während die v2-Dateien da sind.
 
-## Zwei bewiesene Blocker (E2e auf echtem sbx v0.49.1)
+## Was das für die Spec bedeutet
 
-- **A — v2-Kit fräst v3-Mixin-Inhalte weg.** `omp + omlx` → `/opt/omp-sbx/extensions/omlx-provider.ts`
-  vorhanden; `omp + omlx + goversbx-omp (v2)` → weg, in beiden Reihenfolgen. Zwei v3-Mixins mit
-  Inhalt komponieren sauber. Runtime-String: *"mixin composition is accepted in the schema but not
-  yet applied by the runtime"*. Folge heute: oMLX-Provider verschwindet still, wenn goversbx
-  dabei ist.
-- **B — `files/home/.omp/**` kollidiert mit dem Host-Mount.** omp-sbx mountet `~/.omp`; ein v2-Kit,
-  das `files/home/.omp/agent/skills/…` shipped, lässt `sbx create` mit `error: failed to run
-  sandbox container` sterben (Minimal-Repro mit genau einer Datei im Detail-Doc).
-  `com.docker.sandbox/agent-skills@1` ist kein Ausweg — es mountet den Host-Skills-Store.
+`docs/specs/0002-goversbx-omp-kit-v3/epic.md` hat einen Amendment-Eintrag vom 2026-10-26
+bekommen; die Originalanalyse steht darunter als Records.
 
-## Entscheidung
-
-Option 1: `sandbox-kit/kits/goversbx-omp` auf `schemaVersion: "3"` portieren —
-`goversbx-omp.yaml` + `goversbx-omp.dockerfile`, Payload nach `/opt/goversbx/` (außerhalb von
-`$HOME` und außerhalb aller Pfade, die der omp-Workload anlegt), Skill-Installation zur Laufzeit
-durch `register-omp-mcp.sh`. Andere Kits bleiben v2.
+- Option C (`payload unter ~/.omp/agent/skills` aus dem Dockerfile) ist durch B **nicht mehr
+  ausgeschlossen**.
+- v3 bleibt nötig, **falls** goversbx ein Kit shipped und mit `omlx-mixin` komponiert (A).
+- Neu dazwischen: sbx deckt beide Payloads nativ ab. Skills über den Shared Store
+  (`sbx skills add`/`import`), und omp-sbx deklariert `agent-skills@1` auf
+  `~/.omp/agent/skills` — die kommen also read-only an, ohne Kit-`files/`. MCP über
+  `sbx mcp add --url … --header …` + `--static-mcp`; `omp-init.sh` verweist schon auf die
+  `MCP_GATEWAY_URL` des Sandboxes.
+- **Wenn beides trägt, braucht goversbx-omp gar kein Kit** und diese Spec ist gegenstandslos.
 
 ## Nächster Schritt
 
-**Spec ist geschrieben (2026-10-24): `docs/specs/0002-goversbx-omp-kit-v3/` — `epic.md` +
-`slice-1.md`, Status `draft`. Erledigt ist damit Schritt 1; nichts implementiert.** Wartet auf
-Abnahme durch den User (Repo-Regel: Spec-Abnahme durch den User, nicht durch den Agenten). Fünf
-Punkte in `epic.md` §"Open questions" brauchen eine Antwort, u. a. ob `version` im
-v3-Deskriptor bleibt und ob der Skill-Schreibzugriff auf das gemountete Host-`~/.omp` so ok ist.
+1. **Verifizieren, ob der MCP-Gateway den `X-Goversbx-Sandbox-Name`-Platzhalter durchreicht.**
+   Das ist der einzige offene Punkt, der über "Kit löschen oder portieren" entscheidet.
+   Registriert ist `goversbx-network` auf diesem Host bereits (`sbx mcp add`, URL
+   `http://127.0.0.1:8787/mcp`).
+2. Danach entscheiden: native Integration (Store + static MCP, Spec 0002 schließen) oder
+   v3-Port wie spekuliert.
+3. Falls Port: `goversbx-omp.yaml` + `goversbx-omp.dockerfile`, Payload nach `/opt/goversbx/`,
+   `spec.yaml`/`files/` erst nach Gradle- und Skript-Umstellung löschen;
+   `sandbox-kit/build.gradle.kts` `kitSkillDirs` anpassen; `scripts/e2e-omp.sh` erweitern, dass
+   **beide** Dateien in einem Sandbox existieren.
 
-Zwei Annahmen aus diesem Dokument sind durch Messung ersetzt (Details in `epic.md`, Evidence):
-Der Deskriptor heißt **`goversbx-omp.yaml`**, nicht `kit.yaml` — v3 akzeptiert jedes Root-`*.yaml`
-mit `schemaVersion: "3"` (Name = Dateistamm, `--kit-arg goversbx-omp.…` bleibt also), v2
-verlangt `spec.yaml`. Und `sbx kit validate --offline` kann v3 **nicht** prüfen ("no kit builder
-configured") — der erste echte Schema-Check läuft über das `sbx-kit-builder`-Sandbox, das auf
-diesem Host noch nicht existiert.
+Abnahme bleibt beim User (Repo-Regel).
 
-1. Abnahme der Spec (`docs/specs/0002-goversbx-omp-kit-v3/`).
-2. Port: `goversbx-omp.yaml`, `goversbx-omp.dockerfile`, `.dockerignore`, `stage/opt/goversbx/…`;
-   `spec.yaml` und `files/` erst nach Gradle- und Skript-Umstellung löschen.
-3. `sandbox-kit/build.gradle.kts`: `kitSkillDirs["goversbx-omp"]` → `stage/opt/goversbx/skills`.
-4. `scripts/e2e-omp.sh` Schritt 0 und 5 anpassen + neuer Schritt, dass **beide** Dateien
-   (`/opt/goversbx/register-omp-mcp.sh` und `/opt/omp-sbx/extensions/omlx-provider.ts`) in einem
-   Sandbox existieren.
-5. AGENTS.md §"Sandbox kit", README §"The sbx kits", "Verification state", CHANGELOG,
-   Version-Bump-Checkliste (sie nennt "vier `kits/*/spec.yaml`").
+## Beweislage, unverändert gültig
+
+- **A — v2-Kit fräst v3-Mixin-Inhalte weg.** `omp + omlx` → `omlx-provider.ts` vorhanden;
+  `omp + omlx + goversbx-omp (v2)` → weg, in beiden Reihenfolgen. Zwei v3-Mixins mit Inhalt
+  komponieren sauber. Runtime-String: *"mixin composition is accepted in the schema but not yet
+  applied by the runtime"*.
+- omp-sbx hat jetzt einen Build-Zeit-Guard dagegen (`test-kit.sh`: kein Kit im Repo darf v2 sein;
+  Guard gegen synthetischen Verstoß geprüft, also nicht vakk).
 
 ## Umgebung
 
 Daemon läuft (sandbox 8787, admin 8788, 0.3.0-dev). oMLX auf `127.0.0.1:8000`, kein API-Key
-(`OMLX_API_KEY=proxy-managed`). Homebrew-Kit ist 0.2.7 → beim Iterieren den Repo-Pfad (0.3.0)
-benutzen. sbx v0.49.1 installiert, v0.49.2 verfügbar → Blocker-A-Matrix nach einem Upgrade erneut
-fahren. Alle Probe-Sandboxes entfernt, `~/.omp/agent/mcp.json` restauriert.
+(`OMLX_API_KEY=proxy-managed`). sbx **v0.49.2**. Der sandboxd war festgefahren
+(`delete runtime: context canceled`, Sandboxes mit 19–20 h Alter kurz nach Anlage — VM-Uhr
+verschoben); gefixt per `sbx daemon restart`, alle Probe-Sandboxes entfernt. Host
+`~/.sbxenv.yaml` wurde nur zum Proben angelegt und ist wieder gelöscht.
 
-## Nutzung, sobald das Kit v3 ist
+## Nutzung heute (Launcher ist weg)
 
 ```bash
-# .env im Projekt
-OMP_SBX_OMLX=1
-OMP_SBX_EXTRA_KITS=~/IdeaProjects/goversbx/sandbox-kit/kits/goversbx-omp
-omp-sbx --dry-run && omp-sbx --new
+cd ~/code/my-project
+# oMLX-Mixin (v3) — sauber, beide Kits sind v3
+sbx create ~/IdeaProjects/omp-sbx/kits/omp "$PWD" \
+  --kit ~/IdeaProjects/omp-sbx/kits/omlx-mixin --kit-arg omlx-mixin.port=8000 \
+  --static-mcp goversbx-network
+sbx shell omp-my-project
 ```
+
+Der Name kommt nativ aus Kit + Workspace-Verzeichnis (`omp-<basename>`), `--name` ist optional.
+`OMP_SBX_*`-Flags aus `.env` existieren nicht mehr — Defaults laufen über `~/.sbxenv.yaml`,
+Projektkonfiguration über `./sbxenv.yaml` (`sbx env plan|apply|run`).
+
+**Nicht** zusätzlich `goversbx-omp` (v2) anhängen, solange oMLX dabei ist — das ist Blocker A:
+dann fehlt `omlx-provider.ts` im Sandbox. Genau darauf wartet der Guard in omp-sbx's
+`test-kit.sh`.

@@ -3,8 +3,10 @@
 Status: draft (2026-10-24) - awaiting acceptance · Epic: [`epic.md`](epic.md) · Ships in: 0.5.0 (open question 5)
 
 One kit, one format change, no daemon change. Deliverable: `sandbox-kit/kits/goversbx-omp/` is a
-v3 mixin kit that composes with the omp-sbx oMLX mixin and survives a host-mounted `~/.omp`,
-with the agent-visible behaviour unchanged.
+v3 mixin kit that composes with the omp-sbx oMLX mixin, with the agent-visible behaviour
+unchanged. (The earlier requirement to also "survive a host-mounted `~/.omp`" is void: omp-sbx
+no longer mounts it — see `epic.md` amendment 2026-10-26. Blocker A is the only remaining
+reason to port.)
 
 ## Scope
 
