@@ -1,6 +1,6 @@
 # Handoff: port `goversbx-omp` to sbx kit v3
 
-2026-10-24, host `fabian` (macOS, sbx v0.49.1, signed in as `fkretzer`).
+2026-10-24, host `fabian` (macOS, sbx v0.49.1 then, signed in as `fkretzer`).
 Continues work that started in `~/IdeaProjects/omp-sbx` (extra-kits support) and landed here
 because two blockers were proven against a real sbx host.
 
@@ -8,6 +8,33 @@ because two blockers were proven against a real sbx host.
 `schemaVersion: "3"` so it composes with other v3 mixins and stops colliding with a host-mounted
 `~/.omp`. The other three kits (`claude`, `pi`, `opencode`) stay v2 for now — they are not
 affected by the omp-sbx mount, and one kit per migration keeps the e2e surface small.
+
+---
+
+## Amendment (2026-10-26) - what still holds
+
+Host is now **sbx v0.49.2**. Re-measured, and the two blockers moved in opposite directions:
+
+- **A still reproduces** on 0.49.2: with a v2 kit attached, `/opt/omp-sbx/extensions/omlx-provider.ts`
+  is absent while the v2 kit's own files land. Not stale; still the reason a kit that composes with
+  `omlx-mixin` has to be v3.
+- **B no longer applies to omp-sbx**, because its launcher was deleted (commit `ddc2bf1`) and nothing
+  mounts the host `~/.omp` any more. Verified: a v2 kit shipping
+  `files/home/.omp/agent/skills/probe/SKILL.md` creates fine and stages the file, `/proc/mounts` has
+  no `~/.omp` entry. **B is a property of mounting the host config dir, not of the v2 kit form** —
+  it still bites anyone who does mount it, so the repro below stays valid and worth keeping.
+- **The `agent-skills@1` conclusion below was wrong in a useful direction** — see §1B footnote.
+  It does mount the store rather than ship the kit's own files, and that is now the *intended*
+  mechanism: skills come from `sbx skills`, the kit ships none.
+- **New, and it hardens the port case:** `sbx kit add` of a v2 kit onto the v3 omp sandbox is now
+  refused outright — `cannot mix v3 kits with v1/v2 kits in one sandbox; compositions are
+  single-format`. So `goversbx-omp` (v2) can never join an omp sandbox: at `create` it silently
+  wipes the v3 mixin's files, via `kit add` it is a hard error. The error string this doc used to
+  quote no longer appears on 0.49.2. Separately, `kit add` of a v3 kit that needs new permissions
+  dead-ends non-interactively — it says `pass --force`, and `kit add` has no `--force` flag.
+
+Everything below is left as the 2026-10-24 record, including the reasoning that has since been
+overtaken, so the measurement trail stays intact.
 
 ---
 
@@ -34,6 +61,11 @@ model provider. Network policy, env vars and startup hooks still apply — so it
 models are missing in `/model`", far from the cause.
 
 ### B. `files/home/.omp/**` cannot coexist with a host-mounted `~/.omp`
+
+> **Void for omp-sbx since 2026-10-26** — the trigger is the host mount, and omp-sbx no longer
+> creates one. Re-run of the same repro with no `~/.omp` argument: creates, file lands at
+> `/home/agent/.omp/agent/skills/probe/SKILL.md`, `/proc/mounts` clean. Kept below because it is
+> still true for anyone who mounts their host config dir.
 
 omp-sbx passes the host `~/.omp` as an extra workspace (mounted at its mirrored host path and
 symlinked to `/home/agent/.omp`). A **v2** kit that ships `files/home/.omp/agent/skills/…` then
@@ -63,6 +95,17 @@ Target: /usr/share/sandbox/kit/probe-skills/skills
 
 — it does not ship the kit's own skill. It also rejects relative paths:
 `capabilities[0].config.path: skills path "./skills" must be absolute and canonical`.
+
+> **Footnote, 2026-10-26 — this reading was too narrow, and it hid the actual answer.**
+> `config.path` mounts the store *at whatever absolute path you give it*, verified at
+> `/home/agent/.omp/agent/skills` (`virtiofs ro`, store contents visible). So the kit still does
+> not ship its own skill — correct — but that is now the design rather than a dead end: skills
+> come from `sbx skills add`/`import` into the shared store, read-only, and a sandbox may add its
+> own beside them. Two consequences worth knowing: the goversbx skill goes in with one host
+> command instead of a kit payload plus a startup copy; and mounting *inside* `~/.omp` makes sbx
+> create the parent directories **as root**, which broke omp's startup
+> (`EACCES: mkdir ~/.omp/natives`) until the kit image pre-owned them. See
+> `~/IdeaProjects/omp-sbx/docs/specs/0001-minimal-native-scope/epic.md`.
 
 ## 2. sbx v3 kit staging semantics (measured, not assumed)
 
@@ -189,7 +232,42 @@ probe sandbox is not the real working setup.
 
 ## 7. State of the other repo (`~/IdeaProjects/omp-sbx`)
 
-Uncommitted, tested (`TEST_SKIP_SANDBOX=1 ./test-kit.sh` → 24 passed, 0 failed):
+**The launcher is gone (2026-10-26, commit `ddc2bf1`).** `omp-sbx`, `omp-sbxenv`,
+`omp-sbx-mcp-import` and `sbx-preflight.sh` were deleted — ~1330 of 2400 lines — together with the
+`kits/omp/.sbxenv.yaml` template. The feature list at the bottom of this section describes code that
+no longer exists; it is kept only to explain where the decisions came from.
+
+What replaces it, all native and all verified on 0.49.2:
+
+| the launcher did | now |
+|---|---|
+| `--kit` / `--kit-arg` / `OMP_SBX_EXTRA_KITS` from `.env` | `sbx create --kit … --kit-arg …`, or `./sbxenv.yaml` |
+| `sandbox_name_for` | native `omp-<workspace basename>`, agent taken from the kit |
+| mounting host `~/.omp` + symlink | nothing mounts it; each sandbox owns its `~/.omp` |
+| `omp-sbx-mcp-import` | `sbx mcp add` + `--static-mcp`, gateway wired in `omp-init.sh` |
+| kit-form refusal (`mount-shadow`) | deleted with the mount; `v2-wipes-v3` guarded in `test-kit.sh` |
+| mixin drift warning | `sbx env plan`/`apply`, or `sbx template save` to freeze a tuned sandbox |
+
+The kit gained `agent-skills@1` at `~/.omp/agent/skills`, and its image now owns `~/.omp/agent/skills`
+and `~/.omp/natives` as `agent` — see the §1B footnote for why that was load-bearing.
+
+Usage today:
+
+```bash
+cd ~/code/my-project
+sbx create ~/IdeaProjects/omp-sbx/kits/omp "$PWD" \
+  --kit ~/IdeaProjects/omp-sbx/kits/omlx-mixin --kit-arg omlx-mixin.port=8000 \
+  --static-mcp goversbx-network
+sbx shell omp-my-project
+```
+
+Do **not** add `goversbx-omp` (still v2) to that command while oMLX is attached — that is blocker A
+in action, and it is what the build-time guard in `test-kit.sh` fails on.
+
+<details>
+<summary>Deleted launcher feature list, for the record</summary>
+
+Uncommitted as of 2026-10-24, tested (`TEST_SKIP_SANDBOX=1 ./test-kit.sh` → 24 passed, 0 failed):
 
 - `omp-sbx` — `--kit` / `--kit-arg` (consumed, not passed to omp), `OMP_SBX_EXTRA_KITS` +
   `OMP_SBX_EXTRA_KIT_ARGS` from `.env` or exported env (exported wins, exported-empty drops),
@@ -198,20 +276,12 @@ Uncommitted, tested (`TEST_SKIP_SANDBOX=1 ./test-kit.sh` → 24 passed, 0 failed
   `--dry-run` printing the assembled `sbx create`/`sbx run`.
 - `sbx-preflight.sh` — `normalize_kit_ref`, `recorded_kits` (JSON first, table fallback),
   `list_contains`, `kit_mixin_drift`.
-- `omp-sbxenv` — warns when a mixin is declared, since `sbx env` has no `--kit`.
-- `test-kit.sh` — new "launcher kit wiring" section (no sandbox needed) + `TEST_SKIP_SANDBOX=1`.
-- `README.md` — new *Extra kits* section, usage block, component table, sbxenv gaps.
-- `kits/omlx-mixin/` — **untouched, back at HEAD**. Its dockerfile staging does work; the
-  extension only disappears when a v2 kit joins the composition.
+- `omp-sbxenv` — warned when a mixin was declared, since `sbx env` had no `--kit`.
+- `test-kit.sh` — had a "launcher kit wiring" section (no sandbox needed).
+- `kits/omlx-mixin/` — untouched, back at HEAD. Its dockerfile staging does work; the extension
+  only disappears when a v2 kit joins the composition.
 
-Usage from a project once this kit is v3:
-
-```bash
-# .env
-OMP_SBX_OMLX=1
-OMP_SBX_EXTRA_KITS=~/IdeaProjects/goversbx/sandbox-kit/kits/goversbx-omp
-omp-sbx --dry-run && omp-sbx --new
-```
+</details>
 
 ## 8. Environment facts
 
@@ -226,3 +296,18 @@ omp-sbx --dry-run && omp-sbx --new
   byte-identical from backup; scratch dirs and probe kits deleted.
 - sbx v0.49.2 is available (running 0.49.1) — worth re-running the blocker A matrix after an
   upgrade, since "not yet applied by the runtime" reads like something they intend to finish.
+
+### Update 2026-10-26
+
+- Host is **sbx v0.49.2**. Blocker A matrix re-run there: **still fails** — do not wait on an
+  upgrade to fix it.
+- sandboxd had wedged (`delete runtime: context canceled`; sandboxes reporting 19–20 h of age
+  seconds after creation, i.e. a skewed VM clock, which also killed the create/exec streams).
+  Cleared with `sbx daemon restart` — that stops running sandboxes, so ask first. All probe
+  sandboxes (`bprobe-*`, `aprobe-*`, `skprobe`, `mcpprobe*`, `diag*`, `omp-tmp.*`, `omp-demoproj`)
+  removed.
+- `goversbx-network` is **registered** on the host (`sbx mcp add --url http://127.0.0.1:8787/mcp
+  --header "X-Goversbx-Sandbox-Name: goversbx-sandbox-identity-placeholder-v1"`, status `ready`,
+  custom headers) and left in place for the gateway-forwarding test in §6.
+- Host `~/.sbxenv.yaml` was created only to probe the user-level merge, and is deleted again.
+- `sbx kit validate --offline` still cannot check v3 source kits ("no kit builder configured").

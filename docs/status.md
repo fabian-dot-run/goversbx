@@ -20,6 +20,12 @@ Measured on sbx **v0.49.2**, not inferred:
 - **Blocker A still stands**, retested on 0.49.2: with a v2 kit attached, `omlx-provider.ts` is
   absent while the v2 kit's own files land. So a kit that composes with `omlx-mixin` must still
   be v3.
+- **New: `sbx kit add` refuses the mix outright.** v2 kit onto the v3 omp sandbox →
+  `cannot mix v3 kits with v1/v2 kits in one sandbox; compositions are single-format`. So
+  `goversbx-omp` cannot join an omp sandbox by any route — silent wipe at create, hard error on
+  add. `README.md` §"The sbx kits" now records both failure modes; the error string it used to
+  quote no longer appears on 0.49.2. Also found: `kit add` of a v3 kit needing new permissions
+  cannot be confirmed non-interactively — it says `pass --force`, and there is no such flag.
 
 That leaves one question deciding whether this epic survives at all: **does the MCP gateway
 forward the `X-Goversbx-Sandbox-Name` placeholder?** If it does, skills via the native store plus

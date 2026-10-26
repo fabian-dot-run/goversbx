@@ -290,10 +290,25 @@ sbx create --kit sandbox-kit/kits/goversbx-claude --name my-sandbox claude ~/my-
 # or in one step: sbx run --kit ...
 ```
 
-The kit must be applied at **create** time. `sbx kit add` does *not* work for goversbx kits: they
-ship files (the skill, and the pi/omp register scripts), and `sbx kit add`'s recreate flow doesn't
-apply a kit's files (`error: kit "…" declares files, which the kit-add recreate flow does not yet
-apply`). To put the kit on an existing sandbox, recreate it: `sbx rm <name>` then
+The kit must be applied at **create** time. `sbx kit add` does *not* work for goversbx kits. Two
+distinct failure modes, both re-measured on sbx v0.49.2:
+
+- **A v2 kit onto a v3 sandbox is refused outright:**
+  `error: cannot mix v3 kits with v1/v2 kits in one sandbox; compositions are single-format`. So
+  `goversbx-omp` (v2) can never be attached to an omp sandbox (the workload kit is v3) — not at
+  create, where it silently wipes the other kit's files, and not via `kit add`, where it is a hard
+  error. This is the strongest argument for the v3 port in `docs/specs/0002-*`.
+- **A v3 kit that asks for permissions it wasn't granted cannot be added non-interactively:**
+  it prints the permission diff, then `error: stdin is not a terminal; pass --force to skip the
+  confirmation` — but `kit add` has **no `--force` flag** (only `-h`, `--kit-arg`,
+  `--kit-args-file`), and piping `y` does not satisfy it. Verified on `omlx-mixin`, which asked for
+  `host.docker.internal`, `localhost:8000` and `credentials.runtime: omlx` and then dead-ended. Any
+  e2e script that adds such a kit must run from a real terminal.
+
+The error string this section used to quote — *"declares files, which the kit-add recreate flow does
+not yet apply"* — no longer appears on 0.49.2.
+
+To put a kit on an existing sandbox, recreate it: `sbx rm <name>` then
 `sbx create --kit … <name> …`.
 
 | Kit | Agent | What it does |
