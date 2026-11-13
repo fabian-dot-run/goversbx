@@ -37,8 +37,8 @@ On top of the uncommitted slices 1 and 2. `./gradlew check` is green.
 - Docs: README quick start and verb table, CHANGELOG (Unreleased), Homebrew caveats, AGENTS.md,
   threat model (goversbx writes sbx's user defaults; the repo-checkout caveat), `docs/vision.md` (new).
 - **Not done**: `:daemon:e2eTest` on sbx 0.53 (S23-S25, and the whole suite there),
-  `binaryTestNative` (S10 + slice 2's stdin path), the version bump to 0.6.0, the blog post's
-  quick start (`docs/blog/goversbx-de.md` still shows `goversbx run claude ~/mein-projekt`).
+  `binaryTestNative` (S10 + slice 2's stdin path), the version bump to 0.6.0. (The blog post
+  `docs/blog/goversbx-de.md` describes 0.6.0 since 2026-11-13 - do not publish it before the release.)
 
 M10 is measured (slice-3 table): create fails on an existing sandbox, an approval at the prompt is
 remembered, `--force` covers one invocation only - no change to the flow. A first host run of the
