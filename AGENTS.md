@@ -257,7 +257,7 @@ registered through.
 ## Launcher (`scripts/goversbx`)
 
 Thin on purpose (spec 0003 D6, `docs/vision.md`): its own verbs are `run`, `init`, `setup`,
-`start`, `stop`, `status`, `logs`, `dashboard`, `version`, `help`, `upgrade` (reserved) and `sbx`;
+`upgrade`, `start`, `stop`, `status`, `logs`, `dashboard`, `version`, `help` and `sbx`;
 **every other first argument is `exec sbx "$@"`** - don't add a verb for something sbx can do.
 `run` = daemon, `setup --quiet`, scaffold, `sbx env plan` (the sandbox **name is read from its
 `Name:` line**, never derived - sbx 0.53 no longer guarantees `<agent>-<dir>`), `sbx env create` +
@@ -265,8 +265,17 @@ register for a new sandbox, `exec sbx env run`. Never pass a path argument to `s
 skips `~/.sbxenv.yaml` and the goversbx kit with it. `run` only knows `--agent`, `--name`,
 `--force`, `-- ARGS`; resist forwarding more flags (`goversbx env run ...` already does). Only
 `sbxenv.yaml` is a project file - sbx does not read a `.sbxenv.yaml` dotfile in a project.
-Tests: `scripts/testing/test-launcher.sh` against `fake-sbx` (which implements `version` and
-`env plan|create|run|rm`) with `HOME` pointed at a temp directory.
+`upgrade` (slice 4) = `sbx ls` -> the sandbox whose workspace is exactly `$PWD` (several: list and
+stop) -> `sbx inspect` -> `sbx kit add` in the foreground (sbx's permission prompt needs the user's
+terminal; nothing skips it) -> register. **It never interprets sbx's error text** - sbx refuses
+`kit add` in several differently worded ways - and never falls back by itself: `--exec` (policy
+rule, `sbx cp` of the kit's payload, `register-mcp.sh` via `sbx exec`) is an explicit second step.
+sbx's JSON is read by `goversbx-daemon sbx-json` (package `sbxjson`, Jackson tree model, only the
+fields needed), not by `grep`/`sed`: workspace paths contain spaces. An `sbx env` sandbox does not
+pick up a kit that joins the user defaults after its creation, which is why `run` hints at
+`upgrade` for an existing sandbox without the kit.
+Tests: `scripts/testing/test-launcher.sh` against `fake-sbx` (which implements `version`,
+`env plan|create|run|rm`, `inspect`, `kit add`, `cp`) with `HOME` pointed at a temp directory.
 
 ## Testing conventions
 

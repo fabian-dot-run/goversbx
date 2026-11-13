@@ -21,6 +21,9 @@ URL="http://${DAEMON_HOST}:${DAEMON_PORT}/mcp"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 SKILL_NAME="goversbx-network-access"
 SKILL_SRC="/usr/share/goversbx/skills/$SKILL_NAME"
+# Outside the kit (`goversbx upgrade --exec` copies this directory into a sandbox sbx cannot add a
+# kit to) the skill lies next to this script.
+[ -d "$SKILL_SRC" ] || SKILL_SRC="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/skills/$SKILL_NAME"
 export PATH="$HOME/.local/bin:$HOME/.claude/local:$HOME/.bun/bin:$PATH"
 
 failed=""

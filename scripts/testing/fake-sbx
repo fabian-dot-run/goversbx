@@ -28,7 +28,8 @@ case "$cmd" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) name="$2"; shift 2 ;;
-        --kit) ls "$2"/*.yaml >/dev/null 2>&1 || { echo "error: no kit descriptor in $2"; exit 1; }; shift 2 ;;
+        --kit) ls "$2"/*.yaml >/dev/null 2>&1 || { echo "error: no kit descriptor in $2"; exit 1; }; kits="${kits:-}$2
+"; shift 2 ;;
         --kit-arg) shift 2 ;;
         -*) shift ;;
         *) if [ -z "$agent" ]; then agent="$1"; elif [ -z "$ws" ]; then ws="$1"; fi; shift ;;
@@ -39,19 +40,47 @@ case "$cmd" in
     # Like sbx: without --name the sandbox is named <agent>-<workspace dir name>.
     [ -n "$name" ] || { [ "$cmd" = run ] && [ -z "$ws" ] && exit 0; name="$agent-$(basename "${ws:-$PWD}")"; }
     echo "$name" >> "$STATE/sandboxes"
+    # What `ls` and `inspect` report about it: its workspace and its mixin kits.
+    echo "${ws:-$PWD}" > "$STATE/ws-$name"; printf '%s' "${kits:-}" > "$STATE/kits-$name"
     echo "✓ Created sandbox $name" ;;
   kit)
-    [ "$1" = validate ] && ls "$2"/*.yaml >/dev/null 2>&1 || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }
-    echo "kit $2 looks valid (fake: only checks for a descriptor)" ;;
+    case "$1" in
+      validate)
+        ls "$2"/*.yaml >/dev/null 2>&1 || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }
+        echo "kit $2 looks valid (fake: only checks for a descriptor)" ;;
+      add)
+        # `kit add SANDBOX DIR [--kit-arg ...]`: FAKE_SBX_KIT_ADD_FAIL=1 refuses like sbx does for a
+        # sandbox it cannot add a kit to. Adding a kit again replaces it (sbx 0.53).
+        grep -qx "$2" "$STATE/sandboxes" || { echo "error: sandbox \"$2\" not found"; exit 1; }
+        if [ -n "${FAKE_SBX_KIT_ADD_FAIL:-}" ]; then echo "error: sandbox \"$2\" was created before shell shipped as a kit; recreate it"; exit 1; fi
+        { grep -vxF "$3" "$STATE/kits-$2" 2>/dev/null; echo "$3"; } > "$STATE/kits.new"; mv "$STATE/kits.new" "$STATE/kits-$2"
+        echo "Added kit goversbx to sandbox $2" ;;
+      *) echo "fake sbx: unsupported kit $1" >&2; exit 1 ;;
+    esac ;;
+  inspect)
+    # `inspect NAME --format json`, the fields the launcher reads. FAKE_SBX_SESSIONS=n: attached
+    # sessions; FAKE_SBX_INSPECT_FAIL=1: sbx cannot answer.
+    name="$1"
+    [ -z "${FAKE_SBX_INSPECT_FAIL:-}" ] && grep -qx "$name" "$STATE/sandboxes" || { echo "error: sandbox \"$name\" not found"; exit 1; }
+    printf '{"name":"%s","agent":"claude","kits":["docker.io/sbx/claude@sha256:0"' "$name"
+    while read -r k; do [ -z "$k" ] || printf ',"%s"' "$k"; done < "$STATE/kits-$name"
+    ws="$(cat "$STATE/ws-$name")"
+    printf '],"state":"stopped","created_version":"v0.53.0","sessions":%s,"workspace":"%s","host_mounts":[{"host_path":"%s"}' "${FAKE_SBX_SESSIONS:-0}" "$ws" "$ws"
+    [ ! -f "$STATE/env-$name" ] || printf ',{"host_path":"%s/sbxenv.yaml","read_only":true}' "$ws"
+    echo ']}' ;;
+  cp) echo "copied $1 to $2" ;;
   ls)
     printf '['; first=1
     while read -r n; do [ $first = 1 ] || printf ','; first=0
-      printf '{"name":"%s","id":"id-%s","agent":"claude","status":"running","workspaces":[],"created_at":"2026-10-14T00:00:00Z"}' "$n" "$n"
+      printf '{"name":"%s","id":"id-%s","agent":"claude","status":"running","workspaces":["%s"],"created_at":"2026-10-14T00:00:00Z"}' "$n" "$n" "$(cat "$STATE/ws-$n" 2>/dev/null)"
     done < "$STATE/sandboxes"; echo ']' ;;
   exec)
     envs=()
     while [ "$1" = -e ]; do envs+=("$2"); shift 2; done
     name="$1"; shift
+    # FAKE_SBX_EXEC_NOOP=1: only record the call (the launcher tests must not run a sandbox's
+    # commands on the machine).
+    [ -z "${FAKE_SBX_EXEC_NOOP:-}" ] || exit 0
     # Emulate sbx network policy for the script's "is https://HOST reachable" probes, so the smoke
     # test never sends real blocked requests (which would raise approval prompts on the host).
     if [[ "$*" == *"%{http_code}"* && "$*" =~ https://([^[:space:]]+) ]]; then
@@ -107,9 +136,12 @@ case "$cmd" in
           echo "error: the merged environment changes things outside the sandbox that have not been approved; approve this invocation with --force (-f)"; exit 1
         fi
         echo "$name" >> "$STATE/sandboxes"
+        # The kits of the merged environment: every `- source:` / plain entry of both files.
+        echo "$PWD" > "$STATE/ws-$name"; : > "$STATE/env-$name"
+        sed -n 's/^ *- *\(source: *\)\{0,1\}\([^ #]*kits\/[^ #]*\).*/\2/p' "$HOME/.sbxenv.yaml" sbxenv.yaml 2>/dev/null > "$STATE/kits-$name"
         echo "✓ Created sandbox $name" ;;
       run)
-        grep -qx "$name" "$STATE/sandboxes" || echo "$name" >> "$STATE/sandboxes"
+        grep -qx "$name" "$STATE/sandboxes" || { echo "$name" >> "$STATE/sandboxes"; echo "$PWD" > "$STATE/ws-$name"; : > "$STATE/kits-$name"; }
         echo "fake sbx env run: attached to $name, agent args: $*" ;;
       rm) grep -vx "$name" "$STATE/sandboxes" > "$STATE/sandboxes.new"; mv "$STATE/sandboxes.new" "$STATE/sandboxes"; echo "removed $name" ;;
       *) echo "fake sbx: unsupported env $sub" >&2; exit 1 ;;

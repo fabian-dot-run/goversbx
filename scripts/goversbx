@@ -19,7 +19,12 @@
 #   goversbx logs       follow the daemon log
 #   goversbx dashboard  open the admin UI in your default browser
 #   goversbx version    installed release version ("dev" in a repo checkout)
-#   goversbx upgrade    (comes with the next release) how to add the kit to an existing sandbox
+#   goversbx upgrade [NAME] [--refresh] [--exec]
+#       Adds the goversbx kit to a sandbox that already exists (`sbx kit add`, in a terminal: sbx
+#       asks to approve the kit's network rules and recreates the container). Without NAME: the
+#       sandbox whose workspace is the current directory. --refresh re-applies the kit (after an
+#       update). --exec is for sandboxes sbx cannot add a kit to (created by sbx < 0.51, or whose
+#       original kit is gone): network rule, files and registration by hand - lost on recreate.
 #   goversbx sbx ARGS   runs `sbx ARGS` - the way to the sbx verbs goversbx has too:
 #                       run, stop, setup, version, help   (e.g. `goversbx sbx stop my-sandbox`)
 #   goversbx <other>    runs `sbx <other> ...` unchanged (ls, policy, env, kit, exec, rm, ...)
@@ -197,18 +202,21 @@ register_sandbox() {
 MIN_SBX="0.51"
 KIT_DIR="$KITS_DIR/goversbx"
 
-# The file work lives in the daemon binary (`goversbx-daemon config ...`); no daemon is started.
-config_cmd() {
+# The file and JSON work lives in the daemon binary (`goversbx-daemon config|sbx-json ...`); no
+# daemon is started.
+daemon_tool() {
   if [ -n "$DAEMON_BIN" ]; then
-    "$DAEMON_BIN" config "$@"
+    "$DAEMON_BIN" "$@"
   else
     command -v java >/dev/null 2>&1 || die "java not found on PATH (JDK 21+ needed in a repo checkout)"
     mkdir -p "$STATE_DIR"
     build_if_needed
     # A JVM announces JAVA_TOOL_OPTIONS on stderr; that is not part of the answer.
-    (unset JAVA_TOOL_OPTIONS; java -jar "$JAR" config "$@")
+    (unset JAVA_TOOL_OPTIONS; java -jar "$JAR" "$@")
   fi
 }
+
+config_cmd() { daemon_tool config "$@"; }
 
 valid_agent() { # $1 = name
   case "$1" in ""|[!A-Za-z0-9]*|*[!A-Za-z0-9._/:@-]*) return 1 ;; esac
@@ -291,7 +299,7 @@ init_project() {
 }
 
 run_sandbox() {
-  local agent="" name="" force="" plan rc sandbox source
+  local agent="" name="" force="" plan rc sandbox source facts
   while [ $# -gt 0 ]; do
     case "$1" in
       --agent) [ $# -ge 2 ] || die "--agent needs a value"; agent="$2"; shift 2 ;;
@@ -331,12 +339,113 @@ run_sandbox() {
     # agent starts. sbx shows its plan here and asks for approval on a terminal.
     "$SBX" env create ${name:+--name "$name"} ${force:+--force} || exit $?
     register_sandbox "$sandbox"
+  elif facts="$(sandbox_facts "$sandbox")" && [ "$(field "$facts" kit)" = none ]; then
+    # It was created without the kit (plain sbx, or before `goversbx setup`); sbx env does not add
+    # a kit to an existing sandbox.
+    say "$sandbox has no goversbx kit - add it with: goversbx upgrade $sandbox"
   fi
   exec "$SBX" env run ${name:+--name "$name"} ${force:+--force} "$@"
 }
 
+# ---- goversbx on sandboxes that already exist (spec 0003 slice 4) ----
+
+sbx_json() { daemon_tool sbx-json "$@"; }
+
+# One field of `sbx-json sandbox` output. $1 = the output, $2 = key
+field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -n 1; }
+
+# What sbx knows about one sandbox, as key=value lines (kit=this|other|none, sessions=, env=, ...).
+# Fails without output when sbx or its JSON cannot be read.   $1 = sandbox name
+sandbox_facts() {
+  local json
+  json="$("$SBX" inspect "$1" --format json 2>/dev/null)" || return 1
+  printf '%s\n' "$json" | sbx_json sandbox --kit-dir "$KIT_DIR" 2>/dev/null
+}
+
+kit_word() { # $1 = facts
+  case "$(field "$1" kit)" in
+    this) echo "has the goversbx kit" ;;
+    other) echo "has a goversbx kit from $(field "$1" kit_path)" ;;
+    none) echo "no goversbx kit" ;;
+    *) echo "kit state unknown" ;;
+  esac
+}
+
+# The fallback for a sandbox sbx cannot add a kit to: the same three things the kit does, done by
+# hand from outside - network rule, the kit's payload, the registration script.   $1 = sandbox name
+upgrade_by_exec() {
+  local name="$1" share="/home/agent/.local/share"
+  say "adding goversbx to $name without the kit: sbx inspect will not show it, there is no agent context,"
+  say "and it is gone when the sandbox is recreated (then: goversbx run in its project)"
+  "$SBX" policy allow network "localhost:$SANDBOX_API_PORT" --sandbox "$name" || exit $?
+  "$SBX" exec "$name" sh -c "mkdir -p $share && rm -rf $share/goversbx" || exit $?
+  "$SBX" cp "$KIT_DIR/stage/usr/share/goversbx" "$name:$share/goversbx" || exit $?
+  "$SBX" exec -e "GOVERSBX_DAEMON_HOST=host.docker.internal" -e "GOVERSBX_DAEMON_PORT=$SANDBOX_API_PORT" \
+    "$name" sh "$share/goversbx/register-mcp.sh" || exit $?
+}
+
+upgrade_sandbox() {
+  local name="" refresh="" by_exec="" ls_json candidates count facts kit sessions rc line
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --refresh) refresh=1; shift ;;
+      --exec) by_exec=1; shift ;;
+      -*) die "usage: goversbx upgrade [NAME] [--refresh] [--exec]" ;;
+      *) [ -z "$name" ] || die "one sandbox at a time: goversbx upgrade [NAME] [--refresh] [--exec]"; name="$1"; shift ;;
+    esac
+  done
+  [ -f "$KIT_DIR/goversbx.yaml" ] || die "goversbx kit not found (no $KIT_DIR/goversbx.yaml) - set GOVERSBX_KITS_DIR"
+  require_sbx
+
+  if [ -z "$name" ]; then
+    ls_json="$("$SBX" ls --format json 2>/dev/null)" || die "'$SBX ls --format json' failed"
+    candidates="$(printf '%s\n' "$ls_json" | sbx_json workspace-sandboxes --dir "$PWD" --dir "$(pwd -P)")" \
+      || die "cannot read the sandbox list from '$SBX ls --format json'"
+    count="$(printf '%s' "$candidates" | grep -c .)"
+    [ "$count" -gt 0 ] || die "no sandbox has $PWD as its workspace - start one with: goversbx run"
+    if [ "$count" -gt 1 ]; then
+      say "$count sandboxes have $PWD as their workspace:"
+      printf '%s\n' "$candidates" | while IFS="$(printf '\t')" read -r n agent status; do
+        facts="$(sandbox_facts "$n")" || facts=""
+        printf '  %s  (%s, %s, %s)\n' "$n" "$agent" "$status" "$(kit_word "$facts")" >&2
+      done
+      die "name the one to upgrade: goversbx upgrade <name>"
+    fi
+    name="$(printf '%s\n' "$candidates" | cut -f1)"
+  fi
+
+  facts="$(sandbox_facts "$name")" || die "cannot tell what sandbox '$name' has ('$SBX inspect $name --format json' gave nothing usable) - nothing done"
+  kit="$(field "$facts" kit)"; sessions="$(field "$facts" sessions)"
+
+  if [ -n "$by_exec" ]; then
+    upgrade_by_exec "$name"
+  else
+    case "$kit" in
+      this) [ -n "$refresh" ] || { say "$name already has the goversbx kit (re-apply it with: goversbx upgrade $name --refresh)"; exit 0; } ;;
+      other) say "$name has the goversbx kit from $(field "$facts" kit_path) - replacing it with this install's" ;;
+    esac
+    [ "${sessions:-0}" -le 0 ] || say "$name is running with $sessions session(s) - the upgrade recreates its container"
+    [ "$kit" != none ] || [ -t 0 ] || say "sbx will ask to approve the kit's network rules - run this in a terminal"
+    if [ "$SANDBOX_API_PORT" = 8787 ]; then
+      "$SBX" kit add "$name" "$KIT_DIR"; rc=$?
+    else
+      "$SBX" kit add "$name" "$KIT_DIR" --kit-arg "goversbx.daemonPort=$SANDBOX_API_PORT"; rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      say "if sbx refused the sandbox itself (too old, its original kit gone): goversbx upgrade $name --exec  (works without the kit; lost on recreate)"
+      exit "$rc"
+    fi
+    [ "$(field "$facts" env)" != yes ] || [ "$kit" != none ] \
+      || say "$name is an 'sbx env' sandbox: the next 'sbx env run' will ask once to approve the kit it now finds"
+  fi
+
+  start_daemon || exit 1
+  register_sandbox "$name"
+  say "$name has goversbx now"
+}
+
 usage() {
-  sed -n '2,40p' "$SELF" | sed 's/^# \{0,1\}//'
+  sed -n '2,45p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
@@ -391,10 +500,7 @@ case "$cmd" in
   version|--version)
     if [ -f "$SCRIPT_DIR/../share/goversbx/VERSION" ]; then cat "$SCRIPT_DIR/../share/goversbx/VERSION"
     else echo "dev ($REPO_DIR)"; fi ;;
-  upgrade)
-    say "'upgrade' comes with the next release. Until then, in a terminal: $SBX kit add <sandbox> $KIT_DIR"
-    say "(the sandbox must have been created by sbx >= 0.51; older ones must be recreated)"
-    exit 1 ;;
+  upgrade) upgrade_sandbox "$@" ;;
   sbx) exec "$SBX" "$@" ;;
   ""|help|-h|--help)
     usage

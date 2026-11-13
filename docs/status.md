@@ -3,6 +3,26 @@
 Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Slice 4 implemented up to `check` (2026-11-13, uncommitted, e2e and native not run)
+
+`goversbx upgrade [NAME] [--refresh] [--exec]` (spec `0003-sbx-env-native/slice-4.md`, accepted the
+same day): `sbx kit add` onto an existing sandbox, `--exec` for sandboxes sbx refuses (network rule,
+payload, `register-mcp.sh` by hand), and `goversbx run` hints at it for a sandbox without the kit.
+`./gradlew check` is green (unit + contract for the new `goversbx-daemon sbx-json` helpers, 28
+launcher checks). Verified by hand on real sbx 0.53.0 with the `shell` workload: upgrade with and
+without a terminal, "already has", `--refresh`.
+
+Measured for it (the slice's table): `inspect` JSON has `kits` and `created_version`; `kit add`
+needs a terminal the first time, works on a stopped sandbox, and adding again refreshes without a
+prompt; **an `sbx env` sandbox does not pick up a kit that joins the user defaults later**; on the
+host, pre-0.51 sandboxes have no `created_version` and sbx refuses `kit add` for them in at least two
+different ways (original kit path gone; "created before shell shipped as a kit").
+
+**Not done**: e2e S11-S14 (`UpgradeTest`, compiled only - the macOS `script` form is untested),
+`upgrade --exec` against a real sbx end to end, `binaryTestNative`, M8 (`kit add` under a live
+session). The dev sandbox's inner sbx lost its Docker sign-in during the evening (`not signed in to
+Docker`): it needs `sbx login` again before any sandbox can be created there.
+
 ## Slice 3 implemented up to `check` (2026-11-13, uncommitted, e2e and native not run)
 
 On top of the uncommitted slices 1 and 2. `./gradlew check` is green.

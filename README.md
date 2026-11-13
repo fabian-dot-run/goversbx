@@ -158,13 +158,23 @@ scripts/goversbx ls                 # every other verb is sbx's: `sbx ls`, `sbx 
 | `run [--agent A] [--name N] [--force] [-- AGENT ARGS]` | the steps above; for sbx's other flags use `goversbx env run ...` |
 | `init [--agent A]` | step 3 alone |
 | `setup [--agent A] [--check]` | step 2 alone; `--check` only reports (exit 2 on findings) |
+| `upgrade [NAME] [--refresh] [--exec]` | adds the kit to a sandbox that already exists (below) |
 | `start`, `stop`, `status`, `logs`, `dashboard`, `version` | the daemon; `status` also says whether the user defaults are in order |
 | `sbx ARGS...` | runs `sbx ARGS...` - the way to the sbx verbs goversbx has too (`run`, `stop`, `setup`, `version`, `help`), e.g. `goversbx sbx stop my-sandbox` |
 | anything else | passed to sbx unchanged |
 
 The old form `goversbx run <agent> <path>` is gone (0.6.0): `cd` into the project and run
-`goversbx run`. To put the kit onto a sandbox that already exists, run
-`sbx kit add <name> <kit dir>` in a terminal (`goversbx upgrade` will do this). To remove goversbx
+`goversbx run`.
+
+**Sandboxes that already exist** do not get the kit by themselves - not even `sbx env` ones, when
+the kit joined `~/.sbxenv.yaml` after they were created. `goversbx upgrade` (in the project
+directory, or `goversbx upgrade <name>`) runs `sbx kit add` for one sandbox: run it in a terminal,
+sbx asks to approve the kit's network rules and recreates the container; what is in the sandbox's
+home stays. `--refresh` re-applies the kit after a goversbx update. sbx refuses `kit add` for
+sandboxes created before 0.51 and for ones whose original kit is gone; for those
+`goversbx upgrade <name> --exec` sets up the same things by hand (network rule, files, MCP
+registration) - it works until the sandbox is recreated, and `goversbx run` in the project then
+creates a proper one. To remove goversbx
 from sbx, delete its entry under `kits:` in `~/.sbxenv.yaml` - Homebrew has no uninstall hook that
 could. `goversbx dashboard` opens the admin UI at the configured admin port and refuses if the
 daemon isn't running. The daemon keeps running after a session ends - it serves every sandbox -

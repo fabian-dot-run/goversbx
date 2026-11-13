@@ -22,6 +22,15 @@ its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at.
   `goversbx env rm`); `goversbx sbx ...` reaches the sbx verbs goversbx has too (`run`, `stop`,
   `setup`, `version`, `help`). `goversbx help` prints both.
 - `goversbx status` says whether the user defaults are in order.
+- **`goversbx upgrade [NAME]`** puts goversbx onto a sandbox that already exists: it runs
+  `sbx kit add` (in a terminal - sbx asks to approve the kit's network rules and recreates the
+  container; files in the sandbox's home stay) and registers the sandbox. Without a name it takes
+  the sandbox whose workspace is the current directory; several are listed, none is touched.
+  `--refresh` re-applies the kit, for example after a goversbx update. For sandboxes sbx cannot add
+  a kit to - created by sbx older than 0.51, or whose original kit no longer exists -
+  `goversbx upgrade <name> --exec` does the kit's work by hand (network rule, files, MCP
+  registration); that does not survive a recreate. `goversbx run` says so when it attaches to a
+  sandbox without the kit.
 
 ### Changed
 

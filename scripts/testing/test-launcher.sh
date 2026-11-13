@@ -239,13 +239,110 @@ if [ "$ok" = "user defaults: ok" ] && [ "$drift" = "user defaults: 1 finding(s) 
   pass "S22 status shows 'user defaults: ok' and the finding count after the entry was removed"
 else fail "S22 status" "ok=$ok drift=$drift"; fi
 
-# upgrade is reserved; help shows goversbx's verbs, then sbx's.
-out="$("$L" upgrade 2>&1)"; rc=$?
+# help shows goversbx's verbs, then sbx's.
 help="$("$L" help 2>&1)"
-if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "kit add <sandbox> $KIT" \
-   && printf '%s' "$help" | grep -q "goversbx sbx ARGS" && printf '%s' "$help" | grep -q "fake sbx help"; then
-  pass "upgrade is reserved and names 'sbx kit add'; help prints goversbx's verbs and then sbx's"
-else fail "upgrade/help" "rc=$rc out=$out"; fi
+if printf '%s' "$help" | grep -q "goversbx sbx ARGS" && printf '%s' "$help" | grep -q "goversbx upgrade \[NAME\]" \
+   && printf '%s' "$help" | grep -q "Needs: sbx >= 0.51" && printf '%s' "$help" | grep -q "fake sbx help"; then
+  pass "help prints goversbx's verbs and then sbx's"
+else fail "help" "$help"; fi
+
+# --- goversbx upgrade (spec 0003 slice 4) ---------------------------------------------------------
+
+"$L" setup >/dev/null 2>&1      # S22 removed the kit entry; put it back
+PORT="$GOVERSBX_SANDBOX_API_PORT"
+plain_sandbox() { # $1 = name, $2 = workspace: a sandbox created by plain sbx, without the kit
+  "$SBX" create --name "$1" claude "$2" >/dev/null
+}
+
+# S5: no sandbox for this directory.
+ws="$(workspace up-none)"; : > "$CALLS"
+out="$(cd "$ws" && "$L" upgrade 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "start one with: goversbx run" && [ "$(grep -c '^kit add' "$CALLS")" -eq 0 ]; then
+  pass "S5 upgrade without a sandbox for the directory: the 'goversbx run' hint, exit 1"
+else fail "S5 no candidate" "rc=$rc out=$out calls=$(calls)"; fi
+
+# S3: one sandbox for the directory, without the kit.
+ws="$(workspace up-one)"; plain_sandbox up1 "$ws"; : > "$CALLS"
+out="$(cd "$ws" && "$L" upgrade 2>&1)"; rc=$?
+if [ "$rc" -eq 0 ] && [ "$(calls)" = "version|ls --format json|inspect up1 --format json|kit add up1 $KIT --kit-arg goversbx.daemonPort=$PORT|curl sandboxes/up1/register|" ] \
+   && printf '%s' "$out" | grep -q "run this in a terminal" && printf '%s' "$out" | grep -q "up1 has goversbx now"; then
+  pass "S3 upgrade: ls, inspect, kit add with the daemon port, register"
+else fail "S3 upgrade" "rc=$rc out=$out calls=$(calls)"; fi
+
+# S6: it has the kit now - nothing to do; --refresh re-applies; another install's kit is replaced.
+: > "$CALLS"
+out="$(cd "$ws" && "$L" upgrade 2>&1)"; rc=$?
+n_plain="$(grep -c '^kit add' "$CALLS")"
+(cd "$ws" && "$L" upgrade --refresh >/dev/null 2>&1); n_refresh="$(grep -c '^kit add' "$CALLS")"
+echo "/another/install/share/goversbx/kits/goversbx" > "$FAKE_SBX_STATE/kits-up1"
+out_other="$(cd "$ws" && "$L" upgrade 2>&1)"; n_other="$(grep -c '^kit add' "$CALLS")"
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "up1 already has the goversbx kit" && [ "$n_plain" -eq 0 ] \
+   && [ "$n_refresh" -eq 1 ] && [ "$n_other" -eq 2 ] && printf '%s' "$out_other" | grep -q "from /another/install/share/goversbx/kits/goversbx - replacing" \
+   && ! printf '%s' "$out_other" | grep -q "run this in a terminal"; then
+  pass "S6 a sandbox with the kit is left alone; --refresh and another install's kit re-apply it"
+else fail "S6 already has" "rc=$rc out=$out n=$n_plain/$n_refresh/$n_other other=$out_other"; fi
+
+# S4: several sandboxes for the directory - listed, nothing upgraded; a name picks one.
+plain_sandbox up2 "$ws"; : > "$CALLS"
+out="$(cd "$ws" && "$L" upgrade 2>&1)"; rc=$?
+n_listed="$(grep -c '^kit add' "$CALLS")"
+(cd "$(workspace elsewhere)" && "$L" upgrade up2 >/dev/null 2>&1); rc_named=$?
+if [ "$rc" -eq 1 ] && [ "$n_listed" -eq 0 ] && printf '%s' "$out" | grep -q "  up1  (claude, running, has the goversbx kit)" \
+   && printf '%s' "$out" | grep -q "  up2  (claude, running, no goversbx kit)" && printf '%s' "$out" | grep -q "goversbx upgrade <name>" \
+   && [ "$rc_named" -eq 0 ] && [ "$(grep -c "^kit add up2 $KIT " "$CALLS")" -eq 1 ] && [ "$(grep -c '^kit add up1' "$CALLS")" -eq 0 ]; then
+  pass "S4 several candidates are listed with their kit state and none is touched; a name upgrades that one"
+else fail "S4 several candidates" "rc=$rc out=$out rc_named=$rc_named calls=$(calls)"; fi
+
+# S8: kit add fails - sbx's message and status, one line naming --exec, nothing else. Also: no
+# --kit-arg on the default port, and the warning about attached sessions.
+ws="$(workspace up-fail)"; plain_sandbox up3 "$ws"; : > "$CALLS"
+out="$(cd "$ws" && FAKE_SBX_KIT_ADD_FAIL=1 FAKE_SBX_SESSIONS=2 GOVERSBX_SANDBOX_API_PORT=8787 "$L" upgrade 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "was created before shell shipped as a kit" \
+   && [ "$(printf '%s' "$out" | grep -c "goversbx upgrade up3 --exec")" -eq 1 ] && [ "$(count_of "kit add up3 $KIT")" -eq 1 ] \
+   && printf '%s' "$out" | grep -q "up3 is running with 2 session(s)" && [ "$(registrations_of up3)" -eq 0 ] \
+   && ! grep -q "^policy\|^cp\|^exec" "$CALLS"; then
+  pass "S8 kit add fails: sbx's message and status, the --exec hint, no fallback by itself, no register"
+else fail "S8 kit add fails" "rc=$rc out=$out calls=$(calls)"; fi
+
+# S7: --exec - network rule, payload, registration script, register; no kit add.
+: > "$CALLS"
+out="$(cd "$ws" && FAKE_SBX_EXEC_NOOP=1 "$L" upgrade up3 --exec 2>&1)"; rc=$?
+a="$(line_of "policy allow network localhost:$PORT --sandbox up3")"
+c="$(grep -n "^cp $KIT/stage/usr/share/goversbx up3:/home/agent/.local/share/goversbx\$" "$CALLS" | cut -d: -f1)"
+e="$(grep -n "^exec -e GOVERSBX_DAEMON_HOST=host.docker.internal -e GOVERSBX_DAEMON_PORT=$PORT up3 sh /home/agent/.local/share/goversbx/register-mcp.sh\$" "$CALLS" | cut -d: -f1)"
+g="$(line_of "curl sandboxes/up3/register")"
+if [ "$rc" -eq 0 ] && [ -n "$a" ] && [ -n "$c" ] && [ -n "$e" ] && [ -n "$g" ] && [ "$a" -lt "$c" ] && [ "$c" -lt "$e" ] && [ "$e" -lt "$g" ] \
+   && [ "$(grep -c '^kit add' "$CALLS")" -eq 0 ] && printf '%s' "$out" | grep -q "gone when the sandbox is recreated"; then
+  pass "S7 upgrade --exec: policy allow, cp, register-mcp.sh, register - no kit add, and it says what it is not"
+else fail "S7 exec fallback" "rc=$rc a=$a c=$c e=$e g=$g out=$out calls=$(calls)"; fi
+
+# sbx cannot tell: nothing is done.
+out="$(cd "$ws" && FAKE_SBX_INSPECT_FAIL=1 "$L" upgrade up3 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "nothing done"; then
+  pass "upgrade does nothing when sbx inspect gives nothing usable"
+else fail "inspect fails" "rc=$rc out=$out"; fi
+
+# S9: goversbx run on an existing sandbox without the kit hints at upgrade; with the kit it does not.
+ws="$(workspace nine)"; plain_sandbox claude-nine "$ws"; : > "$CALLS"
+out="$(cd "$ws" && "$L" run 2>&1)"
+(cd "$ws" && "$L" upgrade >/dev/null 2>&1)
+out_after="$(cd "$ws" && "$L" run 2>&1)"
+if [ "$(printf '%s' "$out" | grep -c "claude-nine has no goversbx kit - add it with: goversbx upgrade claude-nine")" -eq 1 ] \
+   && [ "$(count_of "env run")" -eq 2 ] && [ "$(count_of "env create")" -eq 0 ] && ! printf '%s' "$out_after" | grep -q "no goversbx kit"; then
+  pass "S9 run on a sandbox without the kit: one hint naming 'goversbx upgrade', still attaches; none once it has the kit"
+else fail "S9 run hint" "out=$out after=$out_after calls=$(calls)"; fi
+
+# S10: outside the kit, register-mcp.sh takes the skill from the directory it lies in.
+cp -R "$KIT/stage/usr/share/goversbx" "$TMP/payload"; mkdir -p "$TMP/h10" "$TMP/bin10"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$TMP/claude10.log" > "$TMP/bin10/claude"; chmod +x "$TMP/bin10/claude"
+out="$(HOME="$TMP/h10" PATH="$TMP/bin10:$PATH" GOVERSBX_DAEMON_PORT=9001 sh "$TMP/payload/register-mcp.sh" 2>&1)"; rc=$?
+link="$TMP/h10/.claude/skills/goversbx-network-access"
+if [ ! -d /usr/share/goversbx/skills ] && [ "$rc" -eq 0 ] && grep -q "mcp add goversbx-network http://host.docker.internal:9001/mcp" "$TMP/claude10.log" \
+   && [ -L "$link" ] && [ -f "$link/SKILL.md" ] && [ "$(readlink "$link")" = "$TMP/payload/skills/goversbx-network-access" ]; then
+  pass "S10 register-mcp.sh outside the kit registers the endpoint and links the skill lying next to it"
+elif [ -d /usr/share/goversbx/skills ]; then
+  pass "S10 skipped: this machine has /usr/share/goversbx/skills (it is a goversbx sandbox itself)"
+else fail "S10 register-mcp.sh outside the kit" "rc=$rc out=$out link=$(readlink "$link" 2>&1)"; fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures launcher test(s) failed; daemon log tail:"; tail -20 "$GOVERSBX_STATE_DIR/daemon.log"; exit 1

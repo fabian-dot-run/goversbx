@@ -99,4 +99,31 @@ class SbxCliContractTest {
         }
         assertTrue(env.sbx.help("env", "plan").output().contains("--name"), "sbx env plan --help lacks --name");
     }
+
+    /** Spec 0003 slice 4, S14: what `goversbx upgrade` reads and calls. */
+    @Test
+    void inspectJsonNamesKitsAndCreatingVersionAndKitAddTakesKitArgs() throws Exception {
+        Sbx.Result inspect = env.sbx.run("inspect", env.a.name, "--format", "json");
+        assertTrue(inspect.ok(), "sbx inspect --format json failed:\n" + inspect.output());
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(inspect.stdout());
+        assertTrue(json.path("kits").isArray() && json.path("kits").size() >= 2, "inspect JSON has no 'kits' list with the workload and our kit:\n" + inspect.stdout());
+        boolean ours = false;
+        for (var kit : json.path("kits")) {
+            ours |= kit.asText().equals(env.config.kit().toString());
+        }
+        assertTrue(ours, "inspect JSON does not list the goversbx kit by its directory path - `goversbx upgrade` could not tell it is there:\n" + inspect.stdout());
+        assertTrue(json.path("created_version").asText().startsWith("v"), "inspect JSON has no 'created_version':\n" + inspect.stdout());
+        assertTrue(json.has("sessions") && json.has("state"), "inspect JSON lacks 'sessions' or 'state'");
+
+        boolean listed = false;
+        for (var row : env.sbx.lsJson()) {
+            if (row.path("name").asText().equals(env.a.name)) {
+                for (var workspace : row.path("workspaces")) {
+                    listed |= env.config.workspace != null && workspace.asText().equals(env.config.workspace.toString());
+                }
+            }
+        }
+        assertTrue(listed || env.config.workspace == null, "sbx ls --format json does not list the workspace of " + env.a.name + " under 'workspaces'");
+        assertTrue(env.sbx.help("kit", "add").output().contains("--kit-arg"), "sbx kit add --help lacks --kit-arg");
+    }
 }

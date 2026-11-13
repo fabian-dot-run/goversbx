@@ -20,6 +20,7 @@ import run.fabian.daemon.sandboxidentity.adapter.web.SandboxIdentityController;
 import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
+import run.fabian.daemon.sbxjson.SbxJsonCommand;
 import run.fabian.daemon.userdefaults.ConfigCommand;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
@@ -39,6 +40,10 @@ public final class Main {
         // `goversbx-daemon config ...` is the file work behind `goversbx setup/init/run`: no daemon.
         if (args.length > 0 && args[0].equals("config")) {
             System.exit(new ConfigCommand(System.out, System.err).run(List.of(args).subList(1, args.length)));
+        }
+        // `goversbx-daemon sbx-json ...` reads sbx's JSON on stdin for the launcher: no daemon either.
+        if (args.length > 0 && args[0].equals("sbx-json")) {
+            System.exit(new SbxJsonCommand(System.in, System.out, System.err).run(List.of(args).subList(1, args.length)));
         }
         int sandboxApiPort = intEnv("GOVERSBX_SANDBOX_API_PORT", 8787);
         int adminPort = intEnv("GOVERSBX_ADMIN_PORT", 8788);
