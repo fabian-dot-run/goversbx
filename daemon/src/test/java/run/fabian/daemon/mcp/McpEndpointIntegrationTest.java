@@ -49,11 +49,6 @@ class McpEndpointIntegrationTest {
             public void registerAnyUnregisteredSandboxes() {
                 throw new AssertionError("should not be called when the identity resolves");
             }
-
-            @Override
-            public java.util.Optional<run.fabian.daemon.sandboxidentity.api.RegisteredSandbox> findRegistered(String sandboxName) {
-                return java.util.Optional.empty();
-            }
         };
     }
 
@@ -133,11 +128,6 @@ class McpEndpointIntegrationTest {
             @Override
             public void registerAnyUnregisteredSandboxes() {
                 registrationTriggered.set(true);
-            }
-
-            @Override
-            public java.util.Optional<run.fabian.daemon.sandboxidentity.api.RegisteredSandbox> findRegistered(String sandboxName) {
-                return java.util.Optional.empty();
             }
         };
         McpContext mcp = McpContext.build(service, sandboxIdentityApi);

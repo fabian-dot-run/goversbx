@@ -71,8 +71,8 @@ final class E2eEnvironment implements AutoCloseable {
         System.out.println("== daemon up: sandboxes reach it at " + config.daemonUrlFromSandbox()
                 + ", admin at " + daemon.admin("/") + " (registration limited to " + config.identityPattern() + ")");
 
-        a = createSandbox(config.sandboxPrefix + "-a", "claude", config.kit("claude"), config.workspace);
-        b = createSandbox(config.sandboxPrefix + "-b", "claude", config.kit("claude"), null);
+        a = createSandbox(config.sandboxPrefix + "-a", "claude", config.kit(), config.workspace);
+        b = createSandbox(config.sandboxPrefix + "-b", "claude", config.kit(), null);
         System.out.println("== sandboxes ready: " + a + (a.workspace == null ? " (no workspace)" : " (workspace " + a.workspace + ")")
                 + ", " + b + " (no workspace). If this JVM dies, remove them with: sbx rm --force " + a + " " + b);
     }

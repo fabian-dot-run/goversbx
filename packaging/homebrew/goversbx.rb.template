@@ -39,9 +39,11 @@ class Goversbx < Formula
       or only when needed:       goversbx start
 
       Admin UI (approve/deny requests): http://127.0.0.1:8788
-      New sandbox with the kit:         goversbx run claude ~/my-project
-                                        (--goversbx-kit pi|omp|opencode for other agents)
-      Standard hosts of a project:      <workspace>/.goversbx/network.yaml (one approval per sandbox)
+      Start working in a project:       cd ~/my-project && goversbx run
+                                        (needs sbx 0.51 or newer; the first run asks for your default
+                                        agent and adds the goversbx kit to ~/.sbxenv.yaml - remove
+                                        that entry by hand if you uninstall)
+      Everything else is sbx:           goversbx ls, goversbx policy log, goversbx sbx stop <name>
 
       What changed in @VERSION@: https://github.com/@REPO@/releases/tag/v@VERSION@
       After an upgrade, restart the daemon: brew services restart goversbx (or goversbx stop && goversbx start)

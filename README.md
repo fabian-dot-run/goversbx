@@ -17,7 +17,7 @@ revisions that moved the MCP server into the daemon and added verified sandbox i
 | Module        | Runs where              | Purpose                                                             |
 |---------------|--------------------------|-----------------------------------------------------------------------|
 | `daemon`      | host, outside sandboxes | Everything: the approval workflow, the MCP endpoint, and sandbox-identity registration, as three bounded contexts (see below) |
-| `sandbox-kit` | inside each sandbox, via sbx | sbx mixin kits (Claude Code, pi, oh-my-pi) that register the daemon's MCP endpoint, allow the sandbox to reach it, and install the skill |
+| `sandbox-kit` | inside each sandbox, via sbx | one sbx v3 mixin kit for every agent (Claude Code, opencode, pi, oh-my-pi): registers the daemon's MCP endpoint, allows the sandbox to reach it, and brings the skill |
 
 ### Inside `daemon`: bounded contexts, hexagonal layering
 
@@ -56,8 +56,8 @@ Apple Silicon only. The daemon is a GraalVM native binary - no JVM needed.
 ```bash
 brew tap fabian-dot-run/goversbx
 brew install goversbx
-brew services start goversbx        # daemon at login (launchd); or `goversbx start` on demand
-goversbx run claude ~/my-project    # start a sandbox with the kit
+brew services start goversbx        # daemon at login (launchd); or let `goversbx run` start it
+cd ~/my-project && goversbx run     # asks once for your default agent, then creates and attaches
 ```
 
 Admin UI: http://127.0.0.1:8788 (or `goversbx dashboard` to open it in your browser). The installed
@@ -67,8 +67,8 @@ works unpacked as is.
 
 ### Releasing
 
-Add the version's section to `CHANGELOG.md`, bump the version (`build.gradle.kts`, the kits'
-`spec.yaml`, the MCP server info in `McpContext`), then push a tag `v<version>`.
+Add the version's section to `CHANGELOG.md`, bump the version (`build.gradle.kts`, the MCP server info
+in `McpContext`), then push a tag `v<version>`.
 `.github/workflows/release.yml` builds the native binary on an Apple Silicon runner (native-image
 can't cross-compile), smoke-tests it, attaches the tarball to a GitHub release whose notes are that
 changelog section (`scripts/release-notes.sh`), and updates `Formula/goversbx.rb` in the tap repo
@@ -129,26 +129,46 @@ opencode kits.
 ## Quick start (repo checkout)
 
 ```bash
-scripts/goversbx run claude ~/my-project        # = start daemon if needed, then sbx run --kit ... claude ~/my-project
-scripts/goversbx run --name my-sb claude ~/my-project
-scripts/goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
-scripts/goversbx dashboard                       # open the admin UI in your default browser
+cd ~/my-project
+scripts/goversbx run                # daemon up, user defaults checked, sandbox created via `sbx env`, agent attached
+scripts/goversbx run --agent codex  # in a new project: another agent than your default
+scripts/goversbx dashboard          # open the admin UI in your default browser
 scripts/goversbx status | logs | stop
+scripts/goversbx ls                 # every other verb is sbx's: `sbx ls`, `sbx policy ...`, `sbx env ...`
 ```
 
-`goversbx dashboard` opens the admin UI at the configured admin port (handy when
-`GOVERSBX_ADMIN_PORT` isn't the default `8788`, so you don't have to remember the URL); it refuses
-if the daemon isn't running.
+`goversbx run` is the whole setup of a project (sbx 0.51 or newer):
 
-`scripts/goversbx` builds the jar if it's missing or stale, starts the daemon in the background for
-real (`GOVERSBX_SBX_DRY_RUN=false` unless set; log and pid file in `~/.local/state/goversbx/`), waits
-for both health endpoints, creates the sandbox with `sbx create --kit sandbox-kit/kits/goversbx-<kit>`,
-registers it with the daemon so a project host set (see below) is already waiting in the dashboard,
-prints what is waiting, and then attaches with `sbx run <name>`.
-The daemon keeps running after the session ends - it serves every sandbox - until
-`scripts/goversbx stop`. For a sandbox that already exists it runs `sbx run` without `--kit` and
-tells you to recreate it if you want the kit (see below). All other `GOVERSBX_*` variables below pass
-through.
+1. starts the daemon if it is not running (for real, `GOVERSBX_SBX_DRY_RUN=false` unless set; log and
+   pid file in `~/.local/state/goversbx/`; a repo checkout builds the jar when it is missing or stale);
+2. `goversbx setup`: keeps **one entry for the goversbx kit in `~/.sbxenv.yaml`**, sbx's user
+   defaults, pointing at this install (and `args.daemonPort` when the daemon is not on 8787). The
+   first time it asks which agent new sandboxes start by default, and never again. Everything else
+   in that file is yours and stays byte for byte; the previous content is kept in
+   `~/.sbxenv.yaml.goversbx-bak`. Because the kit lives in the user defaults, a plain `sbx env run`
+   in any project gets goversbx too;
+3. `goversbx init`: writes `sbxenv.yaml` (`schemaVersion`, `workspace: .`) if the directory has none.
+   An existing file is never touched - put project kits, `env`, a `name` or another `agent` there;
+4. creates the sandbox with `sbx env create` (sbx shows its plan and asks; `--force` approves),
+   registers it with the daemon so its identity is in place before the agent's first call, and
+   attaches with `sbx env run`. An existing sandbox is just attached.
+
+| Verb | What it does |
+|---|---|
+| `run [--agent A] [--name N] [--force] [-- AGENT ARGS]` | the steps above; for sbx's other flags use `goversbx env run ...` |
+| `init [--agent A]` | step 3 alone |
+| `setup [--agent A] [--check]` | step 2 alone; `--check` only reports (exit 2 on findings) |
+| `start`, `stop`, `status`, `logs`, `dashboard`, `version` | the daemon; `status` also says whether the user defaults are in order |
+| `sbx ARGS...` | runs `sbx ARGS...` - the way to the sbx verbs goversbx has too (`run`, `stop`, `setup`, `version`, `help`), e.g. `goversbx sbx stop my-sandbox` |
+| anything else | passed to sbx unchanged |
+
+The old form `goversbx run <agent> <path>` is gone (0.6.0): `cd` into the project and run
+`goversbx run`. To put the kit onto a sandbox that already exists, run
+`sbx kit add <name> <kit dir>` in a terminal (`goversbx upgrade` will do this). To remove goversbx
+from sbx, delete its entry under `kits:` in `~/.sbxenv.yaml` - Homebrew has no uninstall hook that
+could. `goversbx dashboard` opens the admin UI at the configured admin port and refuses if the
+daemon isn't running. The daemon keeps running after a session ends - it serves every sandbox -
+until `goversbx stop`. All other `GOVERSBX_*` variables below pass through.
 
 ## Running the daemon
 
@@ -190,46 +210,6 @@ By default `GOVERSBX_SBX_DRY_RUN=true`, so approvals and sandbox-identity regist
 they *would* run without calling `sbx`. Set it to `false` (and `GOVERSBX_SBX_BINARY` if `sbx` isn't
 on `PATH`) to apply real changes.
 
-### Project host sets
-
-A project can declare the hosts every new sandbox of it needs, so they are unlocked with one
-decision instead of one request per host (spec: `docs/specs/0001-project-host-set/`):
-
-```yaml
-# <workspace>/.goversbx/network.yaml
-version: 1
-profiles:            # optional: user-supplied profiles from ~/.config/goversbx/profiles/<name>.yaml
-  - jvm-build
-hosts:               # optional: the project's own hosts
-  - repo.maven.apache.org
-  - plugins.gradle.org
-```
-
-```yaml
-# ~/.config/goversbx/profiles/jvm-build.yaml   ($XDG_CONFIG_HOME honored)
-version: 1
-hosts:
-  - services.gradle.org
-  - plugins-artifacts.gradle.org
-```
-
-When the daemon registers a new sandbox (its first call, or `POST /api/sandboxes/{name}/register`)
-it reads the file from every workspace `sbx ls` reports for it and raises **one host-set request**
-in the dashboard: profile hosts first, then the file's hosts, each once, hosts already granted to
-the sandbox left out. The human approves or denies the set as a whole, every time - the file is
-writable from inside the sandbox, so it never grants anything by itself. On approval the daemon runs
-one `sbx policy allow network <host>,<host>,... --sandbox <name>` and shows each host's outcome
-(per host if that call fails); pending
-single requests of that sandbox for hosts in the set are answered by the same decision, and a later
-`request_network_access` for a host already granted to the sandbox is approved at once.
-
-The file is strict: `version: 1`, only `profiles`/`hosts`, plain hostnames (the same rule as the
-tool: no wildcards, URLs or IPs), at most 100 hosts, no symlinks. An invalid file raises nothing and
-is explained in the daemon log (and in the admin endpoint's response); the agent never sees it.
-`POST /api/sandboxes/{name}/host-set-requests` (admin token) evaluates the file again for a registered
-sandbox: `201` created, `200` already pending / nothing left, `400` invalid file, `404` unknown
-sandbox. goversbx ships no host lists on purpose - profiles are yours.
-
 ### Configuration file
 
 On first start the daemon writes a commented config file to `~/.config/goversbx/config.properties`
@@ -252,7 +232,8 @@ and never read from a per-sandbox env var (see `docs/plan.md`'s third 2026-10-14
 a hardcoded literal, not an env-var lookup, is the whole point). The first time the daemon sees
 that literal arrive unsubstituted from some sandbox, it automatically lists every running sandbox
 (`sbx ls`) and registers any it doesn't know about yet via `sbx secret set-custom --host
-localhost --value <name>`, then asks the agent to retry. (`localhost`, not `host.docker.internal`:
+localhost --value-stdin` (a per-sandbox token on stdin, never in the process arguments), then asks
+the agent to retry. (`localhost`, not `host.docker.internal`:
 sandboxes reach the daemon at `host.docker.internal:8787`, but the sbx proxy matches that traffic as
 `localhost` - verified with `scripts/diagnose-substitution.sh`.) From then on, the sbx proxy rewrites
 the placeholder to that sandbox's real name on every outbound header to the daemon - the sandbox
@@ -280,76 +261,71 @@ claude mcp add goversbx-network "http://localhost:8787/mcp" --transport http \
 Exposes two tools: `request_network_access(host, reason, timeoutSeconds?)` and
 `check_network_access_status(requestId)`.
 
-## The sbx kits
+## The sbx kit
 
-`sandbox-kit/kits/` holds one sbx v2 **mixin kit** per agent. Start the daemon on the host first -
-a kit runs inside the sandbox and cannot start it - then create sandboxes with the kit:
+`sandbox-kit/kits/goversbx/` is one sbx **v3 mixin kit** for every agent. It needs **sbx 0.51 or
+newer**: since 0.51 the built-in agents are v3 kits, and sbx refuses to combine them with v1/v2 kits
+(which is what goversbx shipped up to 0.4.0). Start the daemon on the host first - a kit runs inside
+the sandbox and cannot start it - then create sandboxes with the kit:
 
 ```bash
-sbx create --kit sandbox-kit/kits/goversbx-claude --name my-sandbox claude ~/my-project
-# or in one step: sbx run --kit ...
+sbx create claude --kit sandbox-kit/kits/goversbx --name my-sandbox ~/my-project
+# or in one step: sbx run claude --kit ...
 ```
 
-The kit must be applied at **create** time. `sbx kit add` does *not* work for goversbx kits. Two
-distinct failure modes, both re-measured on sbx v0.49.2:
+sbx builds the kit from the directory on first use (a second or two; it has no base image, so
+nothing is pulled). What it brings into the sandbox:
 
-- **A v2 kit onto a v3 sandbox is refused outright:**
-  `error: cannot mix v3 kits with v1/v2 kits in one sandbox; compositions are single-format`. So
-  `goversbx-omp` (v2) can never be attached to an omp sandbox (the workload kit is v3) — not at
-  create, where it silently wipes the other kit's files, and not via `kit add`, where it is a hard
-  error. This is the strongest argument for the v3 port in `docs/specs/0002-*`.
-- **A v3 kit that asks for permissions it wasn't granted cannot be added non-interactively:**
-  it prints the permission diff, then `error: stdin is not a terminal; pass --force to skip the
-  confirmation` — but `kit add` has **no `--force` flag** (only `-h`, `--kit-arg`,
-  `--kit-args-file`), and piping `y` does not satisfy it. Verified on `omlx-mixin`, which asked for
-  `host.docker.internal`, `localhost:8000` and `credentials.runtime: omlx` and then dead-ended. Any
-  e2e script that adds such a kit must run from a real terminal.
+| Part | How |
+|------|-----|
+| Network rule to reach the daemon | `network-policy@1`: `localhost:<daemonPort>` and `<daemonHost>:<daemonPort>` |
+| The `goversbx-network-access` skill | `agent-skill@1`: linked into the agent's skills directory by sbx (`~/.claude/skills/`, ...) |
+| MCP registration | install + startup hook `/usr/share/goversbx/register-mcp.sh`, for every agent it finds: Claude Code (`claude mcp add`), opencode (`~/.config/opencode/opencode.json`), pi (`~/.pi/agent/mcp.json`), oh-my-pi (`<agentDir>/mcp.json`) |
+| "Use goversbx for blocked hosts" | agent context, plus an always-loaded rule in `~/.claude/CLAUDE.md` for Claude |
 
-The error string this section used to quote — *"declares files, which the kit-add recreate flow does
-not yet apply"* — no longer appears on 0.49.2.
+Two kit args, `daemonHost` (default `host.docker.internal`) and `daemonPort` (default `8787`), e.g.
+`--kit-arg goversbx.daemonPort=9787`. It composes with other v3 mixins (repeat `--kit`, or list them
+under `kits:` in an `sbxenv.yaml`).
 
-To put a kit on an existing sandbox, recreate it: `sbx rm <name>` then
-`sbx create --kit … <name> …`.
+sbx has no pi/omp agent: layer the kit onto a sandbox where the agent is installed (e.g. `shell`, or
+an omp workload kit). An agent installed *after* the sandbox was created is picked up on the next
+start, or right away with `sbx exec <name> sh /usr/share/goversbx/register-mcp.sh`.
 
-| Kit | Agent | What it does |
-|-----|-------|--------------|
-| `goversbx-claude` | Claude Code (`requires: claude`) | `claude mcp add --transport http --header ...` at install time (+ startup fallback), skill in `~/.claude/skills/` |
-| `goversbx-pi` | pi >= 1.0 | Merges a `goversbx-network` entry (`"exposure": "direct"`) into `~/.pi/agent/mcp.json`, skill in `~/.agents/skills/` |
-| `goversbx-omp` | oh-my-pi | Merges a `"type": "http"` entry into the active profile's `mcp.json`, skill in its `skills/` |
+**Existing sandbox:** `sbx kit add <name> <kit-dir>` adds the kit without losing the sandbox's
+files. It asks you to approve the kit's network rules, so it needs a terminal (there is no flag to
+skip the question), and the sandbox must have been created by sbx 0.51 or newer - older ones have
+to be recreated (`sbx rm <name>`, then create with `--kit`).
 
-All three allow the sandbox to reach the daemon (`permissions.network.allow`) and take two kit args,
-`daemonHost` (default `host.docker.internal`) and `daemonPort` (default `8787`), e.g.
-`--kit-arg goversbx-claude.daemonPort=9787`. sbx has no pi/omp agent, so those two kits go on a
-sandbox where the agent is installed (e.g. `shell`).
+The MCP endpoint is registered in the agent itself, not through sbx's MCP gateway (`sbx mcp add`):
+the gateway calls the daemon from the host, past the sandbox proxy that substitutes the identity
+placeholder, so the daemon could not tell sandboxes apart.
 
-The skill's source of truth is `sandbox-kit/skill/`; each kit carries a copy because kits must be
+The skill's source of truth is `sandbox-kit/skill/`; the kit carries a copy because a kit must be
 self-contained. After editing the skill run `./gradlew :sandbox-kit:syncKitSkills` (`check` fails
-on drift). `./gradlew :sandbox-kit:packageKits` writes one zip per kit to
+on drift). `./gradlew :sandbox-kit:packageKits` writes `goversbx.zip` to
 `sandbox-kit/build/distributions/`.
 
 ### Using plain `sbx` without the `goversbx` launcher
 
 The `goversbx` CLI is only convenience: at its core it does two things — start the daemon if needed,
-then call `sbx run --kit …`. **Once the daemon is already running, you can skip the launcher entirely
-and use normal `sbx`**, just by passing the kit path:
+then call `sbx create --kit …`. **Once the daemon is already running, you can skip the launcher
+entirely and use normal `sbx`**, just by passing the kit path:
 
 ```bash
 # new sandbox:
-sbx create --kit <kits-dir>/goversbx-claude --name my-sb claude ~/project
+sbx create claude --kit <kit-dir> --name my-sb ~/project
 # or start one in a single step:
-sbx run --kit <kits-dir>/goversbx-claude claude ~/project
-# existing sandbox: recreate it with the kit (sbx kit add can't apply goversbx kits - they ship files):
-sbx rm my-sb && sbx create --kit <kits-dir>/goversbx-claude --name my-sb claude ~/project
+sbx run claude --kit <kit-dir> ~/project
+# existing sandbox (created by sbx >= 0.51), in a terminal:
+sbx kit add my-sb <kit-dir>
 ```
 
-`<kits-dir>` is:
+`<kit-dir>` is:
 
-- **repo checkout:** `sandbox-kit/kits/goversbx-<agent>` (`goversbx-claude`, `goversbx-pi`,
-  `goversbx-omp`, `goversbx-opencode`).
-- **Homebrew / tarball install:** `share/goversbx/kits/` under the install prefix (what the launcher
-  resolves as `GOVERSBX_KITS_DIR`, i.e. `../share/goversbx/kits` next to the `goversbx` binary; for
-  Homebrew, `"$(brew --prefix)"/share/goversbx/kits`). The kits are self-contained, so the path works
-  as-is.
+- **repo checkout:** `sandbox-kit/kits/goversbx`.
+- **Homebrew / tarball install:** `share/goversbx/kits/goversbx` under the install prefix (what the
+  launcher resolves from `GOVERSBX_KITS_DIR`, i.e. `../share/goversbx/kits` next to the `goversbx`
+  binary; for Homebrew, `"$(brew --prefix)"/share/goversbx/kits/goversbx`).
 
 Two things the launcher otherwise handles for you:
 
@@ -357,7 +333,7 @@ Two things the launcher otherwise handles for you:
   needs the host's `sbx` CLI and stays outside the sandbox). Start it once with `goversbx start` (or
   `brew services start goversbx`).
 - **Non-default port** — if your daemon isn't on the default `8787`, append
-  `--kit-arg goversbx-<agent>.daemonPort=<port>` (the launcher sets this automatically). On `8787`
+  `--kit-arg goversbx.daemonPort=<port>` (the launcher sets this automatically). On `8787`
   nothing extra is needed.
 
 Everything else — the network rule to reach the daemon and the MCP registration — the kit brings

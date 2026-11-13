@@ -63,35 +63,6 @@ function formatTime(iso) {
   return new Date(iso).toLocaleString();
 }
 
-// A project host set (several hosts, from the project's .goversbx/network.yaml) is a broader grant
-// than one host, so it is marked as such and every host is listed in full before the buttons.
-function isHostSet(r) {
-  return r.origin === 'PROJECT_FILE';
-}
-
-function hostsCell(r) {
-  if (!isHostSet(r)) return escapeHtml(r.host || '');
-  const items = (r.hosts || []).map(h => `<li>${escapeHtml(h)}</li>`).join('');
-  return `<span class="origin">project host set · ${(r.hosts || []).length} hosts</span><ul class="hosts">${items}</ul>`;
-}
-
-function reasonCell(r) {
-  if (!isHostSet(r)) return escapeHtml(r.reason || '');
-  const profiles = (r.profiles || []).length ? `<br>profiles: ${escapeHtml(r.profiles.join(', '))}` : '';
-  return `declared in <code>${escapeHtml(r.source || '')}</code>${profiles}`;
-}
-
-function sbxResultCell(r) {
-  if (r.status !== 'APPROVED') return '-';
-  if (r.sbxApplied) return r.decidedBy === 'goversbx' ? 'already granted' : 'applied';
-  const results = r.hostResults || [];
-  if (results.length > 1) {
-    const failed = results.filter(x => !x.applied).map(x => `${escapeHtml(x.host)}: ${escapeHtml(x.output || '')}`);
-    return `FAILED for ${failed.length} of ${results.length}:<br>${failed.join('<br>')}`;
-  }
-  return `FAILED: ${escapeHtml(r.sbxOutput || '')}`;
-}
-
 function renderPending(requests, tbody, emptyEl) {
   tbody.innerHTML = '';
   const pending = requests.filter(r => r.status === 'PENDING');
@@ -101,14 +72,13 @@ function renderPending(requests, tbody, emptyEl) {
     const tr = document.createElement('tr');
     tr.id = `request-${r.id}`;
     tr.classList.toggle('highlight', location.hash === `#request-${r.id}`);
-    tr.classList.toggle('set', isHostSet(r));
     tr.innerHTML = `
       <td>${escapeHtml(r.sandboxName)}</td>
-      <td>${hostsCell(r)}</td>
-      <td>${reasonCell(r)}</td>
+      <td>${escapeHtml(r.host)}</td>
+      <td>${escapeHtml(r.reason || '')}</td>
       <td>${formatTime(r.requestedAt)}</td>
       <td>
-        <button class="approve" data-id="${r.id}" data-action="approve">Approve${isHostSet(r) ? ' all' : ''}</button>
+        <button class="approve" data-id="${r.id}" data-action="approve">Approve</button>
         <button class="deny" data-id="${r.id}" data-action="deny">Deny</button>
       </td>
     `;
@@ -127,14 +97,16 @@ function renderDecided(requests, tbody, emptyEl) {
 
   for (const r of decided) {
     const tr = document.createElement('tr');
-    tr.classList.toggle('set', isHostSet(r));
+    const sbxResult = r.status === 'APPROVED'
+      ? (r.sbxApplied ? 'applied' : `FAILED: ${escapeHtml(r.sbxOutput || '')}`)
+      : '-';
     tr.innerHTML = `
       <td>${escapeHtml(r.sandboxName)}</td>
-      <td>${hostsCell(r)}</td>
-      <td>${reasonCell(r)}</td>
+      <td>${escapeHtml(r.host)}</td>
+      <td>${escapeHtml(r.reason || '')}</td>
       <td><span class="status status-${r.status}">${r.status}</span></td>
       <td>${formatTime(r.decidedAt)}</td>
-      <td>${sbxResultCell(r)}</td>
+      <td>${sbxResult}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -183,13 +155,10 @@ async function enableNotifications() {
 }
 
 async function notifyCreated(r) {
-  if (!notificationsGranted() || r.status !== 'PENDING') return;
-  const title = isHostSet(r)
-    ? `${r.sandboxName} wants ${(r.hosts || []).length} hosts (project host set)`
-    : `${r.sandboxName} wants ${r.host}`;
-  const body = isHostSet(r) ? (r.hosts || []).join(', ') : (r.reason || 'No reason given.');
+  if (!notificationsGranted()) return;
+  const title = `${r.sandboxName} wants ${r.host}`;
   const options = {
-    body,
+    body: r.reason || 'No reason given.',
     tag: r.id,
     requireInteraction: true,
     data: { id: r.id, token: TOKEN },
@@ -199,7 +168,7 @@ async function notifyCreated(r) {
       await swRegistration.showNotification(title, {
         ...options,
         actions: [
-          { action: 'approve', title: isHostSet(r) ? 'Approve all' : 'Approve' },
+          { action: 'approve', title: 'Approve' },
           { action: 'deny', title: 'Deny' },
         ],
       });

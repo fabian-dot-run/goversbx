@@ -1,8 +1,9 @@
-// Not a compiled Java module. kits/<name>/ are real sbx v2 mixin kits (spec.yaml + files/), usable
-// straight from the source tree (`sbx create --kit sandbox-kit/kits/goversbx-claude ...`) or from git.
-// Because a kit must be self-contained (files/ may not point outside it), each kit carries its own
-// copy of the shared skill under skill/ - `syncKitSkills` refreshes those copies, and `check` fails
-// if one has drifted. `packageKits` zips each kit for distribution.
+// Not a compiled Java module. kits/goversbx/ is a real sbx v3 mixin kit (goversbx.yaml +
+// goversbx.dockerfile + stage/), usable straight from the source tree
+// (`sbx create claude --kit sandbox-kit/kits/goversbx ...`, sbx >= 0.51) - sbx builds it on the host.
+// Because a kit must be self-contained (its build context is the kit directory), it carries its own
+// copy of the shared skill under skill/ - `syncKitSkills` refreshes that copy, and `check` fails
+// if it has drifted. `packageKits` zips the kit for distribution.
 
 plugins {
     base
@@ -10,17 +11,15 @@ plugins {
 
 val sharedSkill = layout.projectDirectory.dir("skill/goversbx-network-access")
 
-// Where each kit's agent looks for skills, relative to the kit directory.
+// Where each kit stages the skill, relative to the kit directory. The runtime exposes it in the
+// agents' skills directories (agent-skill@1); register-mcp.sh links it where the runtime does not.
 val kitSkillDirs = mapOf(
-    "goversbx-claude" to "files/home/.claude/skills",
-    "goversbx-pi" to "files/home/.agents/skills",
-    "goversbx-omp" to "files/home/.omp/agent/skills",
-    "goversbx-opencode" to "files/home/.agents/skills",
+    "goversbx" to "stage/usr/share/goversbx/skills",
 )
 
 val syncKitSkills = tasks.register("syncKitSkills") {
     group = "kit"
-    description = "Copies skill/goversbx-network-access into every kit's files/ tree."
+    description = "Copies skill/goversbx-network-access into every kit's staged payload."
     doLast {
         kitSkillDirs.forEach { (kit, dir) ->
             project.sync {
@@ -59,7 +58,7 @@ tasks.named("check") {
 
 val packageKits = tasks.register("packageKits") {
     group = "kit"
-    description = "Zips every kit under kits/ into build/distributions/<kit>.zip (spec.yaml at the root)."
+    description = "Zips every kit under kits/ into build/distributions/<kit>.zip (descriptor at the root)."
     dependsOn(verifyKitSkills)
 }
 

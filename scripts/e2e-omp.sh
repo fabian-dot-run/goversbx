@@ -7,7 +7,7 @@
 #
 # What it does, each step printed as PASS/FAIL:
 #   1. builds the daemon and starts it for real (GOVERSBX_SBX_DRY_RUN=false)
-#   0. validates the omp kit (`sbx kit validate sandbox-kit/kits/goversbx-omp`)
+#   0. validates the omp kit (`sbx kit validate sandbox-kit/kits/goversbx`)
 #   2. creates two throwaway `shell` sandboxes WITH the kit, installs omp into each
 #   3. checks that the kit's network allow-list lets the sandbox reach the daemon (falls back to an
 #      explicit `sbx policy allow network localhost:<port> --sandbox ...` and reports a FAIL if not)
@@ -69,10 +69,10 @@ OMP_TIMEOUT="${OMP_TIMEOUT:-300}"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx-omp"
+KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx"
 KIT_ARGS=""
 # The kit defaults to port 8787; only pass --kit-arg when the daemon runs elsewhere.
-[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx-omp.daemonPort=$SANDBOX_API_PORT"
+[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx.daemonPort=$SANDBOX_API_PORT"
 RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
@@ -248,6 +248,10 @@ for sb in $CREATED_SANDBOXES; do
   "$SBX" policy allow network "registry.npmjs.org:443" --sandbox "$sb" >/dev/null 2>&1
   if out="$("$SBX" exec "$sb" sh -c 'curl -fsSL https://bun.sh/install | bash && export PATH="$HOME/.bun/bin:$PATH" && bun install -g @oh-my-pi/pi-coding-agent' 2>&1)"; then
     pass "bun + omp installed in $sb"
+    # The kit registers the endpoint for the agents it finds at create and on every start; this
+    # agent was installed after create, so run the kit's hook once now instead of restarting.
+    "$SBX" exec "$sb" sh /usr/share/goversbx/register-mcp.sh >/dev/null 2>&1 \
+      || fail "the kit's register-mcp.sh failed in $sb"
   else
     echo "$out"; die "bun/omp install failed in $sb - bun.sh, github.com, release-assets.githubusercontent.com and registry.npmjs.org are allowed for $sb, but another CDN redirect may need yet another host: sbx policy allow network <host>:443 --sandbox $sb, then re-run"
   fi

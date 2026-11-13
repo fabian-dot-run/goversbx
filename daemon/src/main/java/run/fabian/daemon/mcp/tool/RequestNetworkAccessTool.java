@@ -48,9 +48,8 @@ public final class RequestNetworkAccessTool {
                 .description("""
                         Request outbound network access to a host from this sandbox. A human is asked to \
                         approve or deny the request; approval is permanent for this sandbox. Returns \
-                        immediately once approved/denied (at once, without asking, if the host was already \
-                        granted to this sandbox), or after timeoutSeconds if still pending - in the pending \
-                        case, call check_network_access_status later with the returned requestId.""")
+                        immediately once approved/denied, or after timeoutSeconds if still pending - in the \
+                        pending case, call check_network_access_status later with the returned requestId.""")
                 .build();
 
         return McpServerFeatures.SyncToolSpecification.builder()
@@ -121,15 +120,13 @@ public final class RequestNetworkAccessTool {
     }
 
     static String describe(NetworkAccessRequestView r) {
-        String what = r.host() != null ? "'" + r.host() + "'"
-                : r.hosts().size() + " hosts (" + String.join(", ", r.hosts()) + ")";
         return switch (r.status()) {
-            case APPROVED -> "Approved - network access to " + what
-                    + " is now allowed for this sandbox. requestId=" + r.id();
-            case DENIED -> "Denied - network access to " + what
-                    + " was not granted. requestId=" + r.id();
-            case PENDING -> "Still pending - no human decision yet for " + what
-                    + ". Check back later with check_network_access_status(requestId=\"" + r.id() + "\").";
+            case APPROVED -> "Approved - network access to '" + r.host()
+                    + "' is now allowed for this sandbox. requestId=" + r.id();
+            case DENIED -> "Denied - network access to '" + r.host()
+                    + "' was not granted. requestId=" + r.id();
+            case PENDING -> "Still pending - no human decision yet for '" + r.host()
+                    + "'. Check back later with check_network_access_status(requestId=\"" + r.id() + "\").";
         };
     }
 

@@ -48,14 +48,11 @@ class AdminApiTest {
         assertEquals("binary test", r.path("reason").asText());
         Instant.parse(r.path("requestedAt").asText());
         assertTrue(r.path("decidedAt").isNull());
-        // An agent request is a one-host request: the list form carries the same host, no origin details.
+        // A request is exactly one host: no list form, no origin details (spec 0003 slice 1).
         assertEquals("shape.example", r.path("host").asText());
-        assertEquals(1, r.path("hosts").size());
-        assertEquals("shape.example", r.path("hosts").get(0).asText());
-        assertEquals("AGENT", r.path("origin").asText());
-        assertTrue(r.path("source").isNull());
-        assertEquals(0, r.path("profiles").size());
-        assertTrue(r.path("hostResults").isNull());
+        for (String gone : new String[] {"hosts", "origin", "source", "profiles", "hostResults"}) {
+            assertTrue(r.path(gone).isMissingNode(), gone + " in " + r);
+        }
         daemon.decide(r.path("id").asText(), "deny");
         p.call().join();
     }
@@ -69,10 +66,7 @@ class AdminApiTest {
         Instant.parse(decided.path("decidedAt").asText());
         assertTrue(decided.path("sbxApplied").asBoolean());
         assertEquals("Added rule (fake sbx)", decided.path("sbxOutput").asText());
-        assertEquals(1, decided.path("hostResults").size());
-        assertEquals("approve.example", decided.path("hostResults").get(0).path("host").asText());
-        assertTrue(decided.path("hostResults").get(0).path("applied").asBoolean());
-        assertTrue(daemon.sbx.calls().contains("policy allow network approve.example --sandbox api-approve"), daemon.sbx.calls().toString());
+        assertTrue(daemon.sbx.calls().contains("policy allow network approve.example --sandbox api-approve --no-input"), daemon.sbx.calls().toString());
         String text = Mcp.text(p.call().join());
         assertTrue(text.startsWith("Approved - network access to 'approve.example'"), text);
     }
@@ -137,6 +131,31 @@ class AdminApiTest {
         assertNotNull(DaemonProcess.parse(response.body()));
         assertTrue(daemon.sbx.calls().stream().anyMatch(c -> c.startsWith("secret set-custom --sandbox api-register ")),
                 daemon.sbx.calls().toString());
+    }
+
+    @Test
+    void aHostApprovedEarlierIsAskedForAgain() {
+        Pending first = pending("api-again", "again.example");
+        daemon.decide(first.request().path("id").asText(), "approve");
+        first.call().join();
+
+        // No memory of earlier grants: the same sandbox asking again gets an ordinary pending request.
+        Pending second = pending("api-again", "again.example");
+        assertEquals("PENDING", second.request().path("status").asText());
+        assertTrue(second.request().path("decidedBy").isNull());
+        JsonNode decided = daemon.decide(second.request().path("id").asText(), "approve");
+        assertEquals("binary-test", decided.path("decidedBy").asText());
+        second.call().join();
+        assertEquals(2, daemon.sbx.calls().stream()
+                .filter(c -> c.equals("policy allow network again.example --sandbox api-again --no-input")).count(), daemon.sbx.calls().toString());
+    }
+
+    @Test
+    void theHostSetEndpointIsGone() {
+        var response = daemon.postJson(daemon.admin("/api/sandboxes/api-register/host-set-requests"), "");
+        assertEquals(404, response.statusCode(), response.body());
+        var text = daemon.postJson(daemon.admin("/api/sandboxes/api-register/host-set-requests?format=text"), "");
+        assertEquals(404, text.statusCode(), text.body());
     }
 
     private static boolean contains(JsonNode list, String host) {

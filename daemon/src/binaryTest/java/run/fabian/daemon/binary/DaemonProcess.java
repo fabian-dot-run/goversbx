@@ -144,8 +144,8 @@ final class DaemonProcess implements AutoCloseable {
     /**
      * Registers {@code name} through the loopback admin endpoint (what an operator pre-warming a
      * sandbox does) and returns the identity token the daemon injected for it - read from the
-     * daemon's dry-run output, or, in real mode, from the {@link FakeSbx} recording of the
-     * {@code secret set-custom} argv. This is the trusted, host-side channel standing in for the
+     * daemon's dry-run output, or, in real mode, from the {@link FakeSbx} recording of what
+     * {@code secret set-custom --value-stdin} read. This is the trusted, host-side channel standing in for the
      * sbx proxy; a sandbox can never obtain this value.
      */
     String tokenFor(String name) {
@@ -154,19 +154,14 @@ final class DaemonProcess implements AutoCloseable {
             fail("register " + name + " -> " + response.statusCode() + ": " + response.body());
         }
         String output = parse(response.body()).path("output").asText("");
-        String token = valueArg(output);              // dry run: command (with --value) is in the output
+        String token = FakeSbx.stdinOf(output);       // dry run: the would-be stdin value is in the output
         if (token == null) {
-            token = sbx.tokenFor(name);               // real mode: read it from the recorded argv
+            token = sbx.tokenFor(name);               // real mode: read it from the recorded call
         }
         if (token == null || token.isBlank()) {
             fail("no identity token minted for " + name + "; register output: " + output + "; sbx calls: " + sbx.calls());
         }
         return token;
-    }
-
-    private static String valueArg(String command) {
-        int i = command.indexOf("--value ");
-        return i < 0 ? null : command.substring(i + "--value ".length()).trim();
     }
 
     HttpResponse<String> get(URI uri) {
@@ -198,36 +193,6 @@ final class DaemonProcess implements AutoCloseable {
             }
         });
         return matches;
-    }
-
-    /** All requests (any status) matching the predicate, newest data. */
-    List<JsonNode> requestsWhere(java.util.function.Predicate<JsonNode> predicate) {
-        List<JsonNode> matches = new java.util.ArrayList<>();
-        adminJson("/api/requests").forEach(r -> {
-            if (predicate.test(r)) {
-                matches.add(r);
-            }
-        });
-        return matches;
-    }
-
-    /** Project host sets (any status) of this sandbox. */
-    List<JsonNode> hostSetsOf(String sandbox) {
-        return requestsWhere(r -> "PROJECT_FILE".equals(r.path("origin").asText()) && sandbox.equals(r.path("sandboxName").asText()));
-    }
-
-    /** Waits until a pending project host set for this sandbox exists and returns it. */
-    JsonNode awaitPendingHostSet(String sandbox) {
-        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
-        while (System.nanoTime() < deadline) {
-            for (JsonNode r : hostSetsOf(sandbox)) {
-                if ("PENDING".equals(r.path("status").asText())) {
-                    return r;
-                }
-            }
-            sleep(50);
-        }
-        return fail("no pending host set for " + sandbox + " within 20s; log:\n" + log());
     }
 
     /** Waits until exactly one pending request for this host exists and returns it. */

@@ -5,7 +5,7 @@
 #     SKIP_CLAUDE=1 scripts/e2e-claude.sh
 #
 # "Sandboxes" are just names; `exec` runs locally. Simulates proxy placeholder substitution:
-# once `secret set-custom --sandbox N ... --placeholder P --value V` ran, `exec N` sees PLACEHOLDER=V
+# once `secret set-custom --sandbox N ... --placeholder P --value-stdin` (or `--value V`) ran, `exec N` sees PLACEHOLDER=V
 # (FAKE_SBX_NO_SUBSTITUTION=1 simulates the proxy not substituting, FAKE_SBX_PLACEHOLDER_KEYED=1
 # simulates all sandboxes sharing one secret because they share the placeholder). Reachability probes
 # (`curl -w %{http_code} https://HOST`) are answered from the recorded policy (200 if allowed for that
@@ -22,13 +22,13 @@ case "$cmd" in
     [ "$cmd" = run ] && echo "fake sbx run args: $*"
     # FAKE_SBX_CREATE_FAIL=1 makes `create` fail the way sbx does when it can't create a sandbox.
     if [ "$cmd" = create ] && [ -n "${FAKE_SBX_CREATE_FAIL:-}" ]; then echo "error: fake create failure"; exit 3; fi
-    # `--kit DIR` is only checked for a spec.yaml; the kit itself (MCP registration, network
+    # `--kit DIR` is only checked for a kit descriptor (a root *.yaml); the kit itself (MCP registration, network
     # allow-list) is not emulated - the daemon is reached on localhost without a policy anyway.
     name=""; agent=""; ws=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) name="$2"; shift 2 ;;
-        --kit) [ -f "$2/spec.yaml" ] || { echo "error: no spec.yaml in kit $2"; exit 1; }; shift 2 ;;
+        --kit) ls "$2"/*.yaml >/dev/null 2>&1 || { echo "error: no kit descriptor in $2"; exit 1; }; shift 2 ;;
         --kit-arg) shift 2 ;;
         -*) shift ;;
         *) if [ -z "$agent" ]; then agent="$1"; elif [ -z "$ws" ]; then ws="$1"; fi; shift ;;
@@ -38,16 +38,15 @@ case "$cmd" in
     [ "$cmd" = run ] && grep -qx "$agent" "$STATE/sandboxes" && exit 0
     # Like sbx: without --name the sandbox is named <agent>-<workspace dir name>.
     [ -n "$name" ] || { [ "$cmd" = run ] && [ -z "$ws" ] && exit 0; name="$agent-$(basename "${ws:-$PWD}")"; }
-    echo "$name" >> "$STATE/sandboxes"; [ -n "$ws" ] && echo "$ws" > "$STATE/ws-$name"
+    echo "$name" >> "$STATE/sandboxes"
     echo "✓ Created sandbox $name" ;;
   kit)
-    [ "$1" = validate ] && [ -f "$2/spec.yaml" ] || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }
-    echo "kit $2 looks valid (fake: only checks for spec.yaml)" ;;
+    [ "$1" = validate ] && ls "$2"/*.yaml >/dev/null 2>&1 || { echo "fake sbx: kit $1 $2 failed" >&2; exit 1; }
+    echo "kit $2 looks valid (fake: only checks for a descriptor)" ;;
   ls)
     printf '['; first=1
     while read -r n; do [ $first = 1 ] || printf ','; first=0
-      w="[]"; [ -f "$STATE/ws-$n" ] && w="[\"$(cat "$STATE/ws-$n")\"]"
-      printf '{"name":"%s","id":"id-%s","agent":"claude","status":"running","workspaces":%s,"created_at":"2026-10-14T00:00:00Z"}' "$n" "$n" "$w"
+      printf '{"name":"%s","id":"id-%s","agent":"claude","status":"running","workspaces":[],"created_at":"2026-10-14T00:00:00Z"}' "$n" "$n"
     done < "$STATE/sandboxes"; echo ']' ;;
   exec)
     envs=()
@@ -66,11 +65,61 @@ case "$cmd" in
     sub=""; [ -z "${FAKE_SBX_NO_SUBSTITUTION:-}" ] && [ -f "$secret_file" ] && sub="PLACEHOLDER=$(cat "$secret_file")"
     env "${envs[@]}" $sub "$@" ;;
   rm) echo "removed" ;;
+  stop) echo "stopped $*" ;;
+  version) echo "sbx version v${FAKE_SBX_VERSION:-0.53.0} fake" ;;
+  --help) echo "fake sbx help" ;;
+  env)
+    # `sbx env plan|create|run|rm` for the launcher tests: the environment is ./sbxenv.yaml merged
+    # over ~/.sbxenv.yaml (only `agent:` and `name:` are read). A path argument is recorded like
+    # everything else in calls.log - the launcher must never pass one.
+    sub="$1"; shift
+    name=""; force=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name) name="$2"; shift 2 ;;
+        --force|-f) force=1; shift ;;
+        --) break ;;
+        *) shift ;;
+      esac
+    done
+    field() { # $1 = key: the project file's value, else the user defaults'
+      for f in sbxenv.yaml "$HOME/.sbxenv.yaml"; do
+        v="$(sed -n "s/^$1: *[\"']\{0,1\}\([^\"' #]*\).*/\1/p" "$f" 2>/dev/null | head -n 1)"
+        [ -n "$v" ] && { echo "$v"; return; }
+      done
+    }
+    [ -f sbxenv.yaml ] || [ -f "$HOME/.sbxenv.yaml" ] || { echo "error: no sbxenv.yaml found at $PWD/sbxenv.yaml"; exit 1; }
+    agent="$(field agent)"
+    [ -n "$agent" ] || { echo "error: invalid $PWD/sbxenv.yaml: agent is required"; exit 1; }
+    [ -n "$name" ] || name="$(sed -n 's/^name: *\([^ #]*\).*/\1/p' sbxenv.yaml 2>/dev/null | head -n 1)"
+    [ -n "$name" ] || name="$agent-$(basename "$PWD")"
+    case "$sub" in
+      plan)
+        if [ -n "${FAKE_SBX_PLAN_FAIL:-}" ]; then echo "error: fake plan failure"; exit 1; fi
+        # FAKE_SBX_PLAN_NO_NAME=1: a later sbx whose plan output the launcher cannot read.
+        printf '\nENVIRONMENT\n'
+        [ -n "${FAKE_SBX_PLAN_NO_NAME:-}" ] || printf '  Name:   %s\n' "$name"
+        printf '  Files:  %s\n\nSANDBOX\n  + %s\n      agent: %s\n' "$PWD/sbxenv.yaml" "$name" "$agent" ;;
+      create)
+        if [ -n "${FAKE_SBX_CREATE_FAIL:-}" ]; then echo "error: fake create failure"; exit 3; fi
+        # FAKE_SBX_NEEDS_APPROVAL=1: like sbx without a terminal - refused unless --force.
+        if [ -n "${FAKE_SBX_NEEDS_APPROVAL:-}" ] && [ -z "$force" ]; then
+          echo "error: the merged environment changes things outside the sandbox that have not been approved; approve this invocation with --force (-f)"; exit 1
+        fi
+        echo "$name" >> "$STATE/sandboxes"
+        echo "✓ Created sandbox $name" ;;
+      run)
+        grep -qx "$name" "$STATE/sandboxes" || echo "$name" >> "$STATE/sandboxes"
+        echo "fake sbx env run: attached to $name, agent args: $*" ;;
+      rm) grep -vx "$name" "$STATE/sandboxes" > "$STATE/sandboxes.new"; mv "$STATE/sandboxes.new" "$STATE/sandboxes"; echo "removed $name" ;;
+      *) echo "fake sbx: unsupported env $sub" >&2; exit 1 ;;
+    esac ;;
   policy)
     sub="$1"; shift
     case "$sub" in
       allow) echo "$2 $4" >> "$STATE/policy"; echo "allowed $2 for $4" ;;
       ls) grep " $1\$" "$STATE/policy" 2>/dev/null ;;
+      log) echo "fake policy log" ;;
     esac ;;
   secret)
     sub="$1"; shift
@@ -80,6 +129,8 @@ case "$cmd" in
         # the way sbx does, so a wrong flag in the daemon shows up here too.
         while [ $# -gt 0 ]; do
           case "$1" in
+            --value-stdin) v="$(cat)"; shift; continue ;;
+            --no-input) shift; continue ;;
             --sandbox) n="$2";; --value) v="$2";; --placeholder) ;;
             --host) [[ "$2" == *:* || "$2" == */* ]] && { echo "error: invalid target \"$2\": expected host or IP without scheme/port"; exit 1; } ;;
             --env) [[ "$2" =~ ^[A-Z_][A-Z0-9_]*$ ]] || { echo "error: invalid env name \"$2\": expected pattern ^[A-Z_][A-Z0-9_]*\$"; exit 1; } ;;

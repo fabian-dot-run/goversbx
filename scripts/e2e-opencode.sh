@@ -7,7 +7,7 @@
 #
 # What it does, each step printed as PASS/FAIL:
 #   1. builds the daemon and starts it for real (GOVERSBX_SBX_DRY_RUN=false)
-#   0. validates the opencode kit (`sbx kit validate sandbox-kit/kits/goversbx-opencode`)
+#   0. validates the opencode kit (`sbx kit validate sandbox-kit/kits/goversbx`)
 #   2. creates two throwaway sandboxes WITH the kit (`sbx create --kit <kit> --name ... opencode <ws>`)
 #   3. checks that the kit's network allow-list lets the sandbox reach the daemon (falls back to an
 #      explicit `sbx policy allow network localhost:<port> --sandbox ...` and reports a FAIL if not)
@@ -58,10 +58,10 @@ OPENCODE_TIMEOUT="${OPENCODE_TIMEOUT:-300}"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx-opencode"
+KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx"
 KIT_ARGS=""
 # The kit defaults to port 8787; only pass --kit-arg when the daemon runs elsewhere.
-[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx-opencode.daemonPort=$SANDBOX_API_PORT"
+[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx.daemonPort=$SANDBOX_API_PORT"
 RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"

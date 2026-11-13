@@ -10,7 +10,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * What `sbx create --kit goversbx-claude` must have done inside the sandbox - nothing here was
+ * What `sbx create claude --kit goversbx` must have done inside the sandbox - nothing here was
  * installed by hand. The sandbox's own environment is the oracle (files, `claude mcp list`).
  */
 @Order(2)
@@ -24,7 +24,7 @@ class ClaudeKitTest {
         for (Sandbox sandbox : new Sandbox[] {env.a, env.b}) {
             String health = sandbox.daemonHealth();
             assertTrue(health.contains("\"ok\""), sandbox + " cannot reach " + env.config.daemonUrlFromSandbox()
-                    + "/api/health through the kit's permissions.network.allow: " + health);
+                    + "/api/health through the kit's network-policy allow rules: " + health);
         }
     }
 

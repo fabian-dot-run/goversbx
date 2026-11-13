@@ -4,6 +4,61 @@ All notable changes to goversbx. The section of a release is what `gh release cr
 its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at. Format after
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver (0.x: minor = feature).
 
+## Unreleased
+
+### Added
+
+- **`goversbx run` is now the whole setup of a project, on `sbx env`.** `cd` into the project and
+  run it: it starts the daemon, checks sbx's user defaults, writes `sbxenv.yaml` if there is none
+  (`workspace: .`), creates the sandbox with `sbx env create`, registers it and attaches with
+  `sbx env run`. It composes with whatever the project's own `sbxenv.yaml` declares (kits, env, name).
+- `goversbx setup`: keeps exactly one entry for the goversbx kit in `~/.sbxenv.yaml` (the path of
+  this install, `args.daemonPort` when the daemon is not on 8787) and asks once for the default
+  agent. Comments, order and everything else in the file stay byte for byte; the previous content is
+  saved as `~/.sbxenv.yaml.goversbx-bak`. `setup --check` reports without writing. With the kit in
+  the user defaults, a plain `sbx env run` gets goversbx too.
+- `goversbx init`: writes the project's `sbxenv.yaml` if there is none.
+- **Every verb goversbx does not know goes to sbx unchanged** (`goversbx ls`, `goversbx policy log`,
+  `goversbx env rm`); `goversbx sbx ...` reaches the sbx verbs goversbx has too (`run`, `stop`,
+  `setup`, `version`, `help`). `goversbx help` prints both.
+- `goversbx status` says whether the user defaults are in order.
+
+### Changed
+
+- **Breaking: `goversbx run <agent> <path> [sbx run flags]` is gone.** `run` takes `--agent`,
+  `--name`, `--force` and `-- AGENT ARGS`; everything else is `goversbx env run ...`. The old form is
+  refused with one line. An unknown first argument is no longer an error of goversbx - sbx answers it.
+- **Needs sbx 0.51 or newer.** sbx 0.51 turned the built-in agents into v3 kits and refuses to
+  combine them with v1/v2 kits, so the four kits `goversbx-claude`, `goversbx-pi`, `goversbx-omp`
+  and `goversbx-opencode` are replaced by **one v3 kit, `goversbx`, for every agent**
+  (`share/goversbx/kits/goversbx`). It brings the same things as before - the network rule to reach
+  the daemon, the skill, the MCP registration, the `CLAUDE.md` rule for Claude - and composes with
+  other v3 mixins. `--kit-arg goversbx-<agent>.daemonPort=…` is now `--kit-arg goversbx.daemonPort=…`.
+- `goversbx run --goversbx-kit …` and `GOVERSBX_KIT` are gone (one kit); the flag is refused with a
+  hint.
+- The kit can be added to an existing sandbox created by sbx 0.51+: `sbx kit add <name> <kit dir>`
+  in a terminal. Recreating is only needed for older sandboxes.
+- The daemon hands the sandbox identity token to `sbx secret set-custom` on stdin (`--value-stdin`)
+  instead of as an argument, so it no longer shows up in the host's process list, and passes
+  `--no-input` on every sbx call so a prompt (for example Docker sign-in) fails with a message
+  instead of hanging an approval.
+
+### Removed
+
+- Project host sets are gone (spec 0003, D10): `<workspace>/.goversbx/network.yaml` and the profiles
+  in `~/.config/goversbx/profiles/` are no longer read, `POST /api/sandboxes/{name}/host-set-requests`
+  answers 404, and the dashboard shows one host per row again. `goversbx run` still creates the
+  sandbox, registers it with the daemon and attaches; it no longer asks for a host set. For hosts
+  every sandbox may reach use `sbx policy allow network <host>`; everything else is requested per
+  host by the agent.
+
+### Changed
+
+- A request for a host that was already approved for the sandbox is no longer approved automatically
+  (`decidedBy: goversbx`): it is an ordinary pending request a human decides again.
+- A request in the admin API's JSON has exactly one `host` again; `hosts`, `origin`, `source`,
+  `profiles` and `hostResults` are gone.
+
 ## 0.4.0 - 2026-10-24
 
 The project host set now waits in the dashboard before the agent starts. Verified end to end against sbx 0.49.1.

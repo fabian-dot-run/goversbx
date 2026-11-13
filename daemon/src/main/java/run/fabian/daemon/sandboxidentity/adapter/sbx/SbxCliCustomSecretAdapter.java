@@ -6,10 +6,15 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * {@code sbx secret set-custom ... --value-stdin --no-input}: the token goes to sbx on stdin, never
+ * as an argument - argv is visible to every process of the host user ({@code ps}). Needs sbx 0.51.
+ */
 public final class SbxCliCustomSecretAdapter implements SbxCustomSecretPort {
 
     private static final Logger log = LoggerFactory.getLogger(SbxCliCustomSecretAdapter.class);
@@ -31,10 +36,13 @@ public final class SbxCliCustomSecretAdapter implements SbxCustomSecretPort {
                 "--host", targetHost,
                 "--env", envVarName,
                 "--placeholder", placeholder,
-                "--value", value);
+                "--value-stdin",
+                "--no-input");
 
         if (dryRun) {
-            String fakeOutput = "dry-run: would execute: " + String.join(" ", command);
+            // Nothing runs, so the value has no other way out: the dry-run output is the only place
+            // an operator (and the contract suite) can read which token would have been set.
+            String fakeOutput = "dry-run: would execute: " + String.join(" ", command) + " <stdin:" + value + ">";
             log.info(fakeOutput);
             return new Result(true, fakeOutput);
         }
@@ -43,6 +51,9 @@ public final class SbxCliCustomSecretAdapter implements SbxCustomSecretPort {
             Process process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start();
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(value.getBytes(StandardCharsets.UTF_8));
+            }
             String output;
             try (BufferedReader reader =
                     new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {

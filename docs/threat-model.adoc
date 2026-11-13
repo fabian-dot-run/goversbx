@@ -334,18 +334,26 @@ workspace path from `sbx ls`) next to the agent-supplied reason, and visually se
 "attested by the daemon" fields from "claimed by the agent" ones. Residual risk remains and is
 accepted.
 
-*Addendum (2026-10-23, spec 0001 slice 1).* The project file `<workspace>/.goversbx/network.yaml`
-is a second attacker-influenced input: the workspace is writable from inside the sandbox, so the
-agent can write any host list into it. Mitigations as built: the file never grants anything on its
-own - it becomes one pending host-set request the human decides as a whole, every time; the
-dashboard lists every host of the set and marks it as a broader grant; the hosts pass the same F2/F3
-rules as the tool's `host` (`HostValidation`, `LocalTargetGuard`), one bad entry invalidates the
-whole file; at most 100 hosts, 64 KiB, no symlinks; the daemon reads only the path `sbx ls` reports
-as a workspace, never one the agent names. Profiles live in the user's config dir, outside every
-sandbox. Residual risk: the human skims a long list - hence the cap and the "read every host" hint
-in the UI. Slice 3 (hash-pinned auto-apply) must keep the first approval of any file content human.
-
 '''
+
+== goversbx writes sbx's user defaults (0.6.0)
+
+`goversbx setup` (also run by `goversbx run`) edits `~/.sbxenv.yaml`, a host file sbx acts on for
+every `sbx env` invocation. What it may change there is deliberately narrow: one `kits` entry -
+the one whose path ends in `/kits/goversbx` - and, only when the file has none, the `agent`. It
+never writes a `lifecycle` entry (host commands), an `mcp.servers` entry or an sbx setting; a file
+it cannot parse or splice safely is refused, not rewritten, and the previous content is kept as
+`~/.sbxenv.yaml.goversbx-bak`. The project scaffold (`sbxenv.yaml` in the project root) declares a
+workspace mount and nothing else; sbx mounts that file read-only into the sandbox.
+
+*A repo checkout is weaker than an installed goversbx here.* `scripts/goversbx setup` points the
+user defaults at `sandbox-kit/kits/goversbx` inside the checkout. If that checkout is itself
+mounted writable into a sandbox - the goversbx dev sandbox is - an agent working on goversbx can
+change the kit that every other sandbox on the machine gets on its next create, including its
+install hook. The Homebrew/tarball layout does not have this property (the kit lives outside any
+workspace). Do not run `scripts/goversbx setup` from a checkout an agent can write to on a machine
+whose other sandboxes matter; this is the same class as E18/E19 of spec 0003 (an agent widening its
+next incarnation's access) and the reason goversbx does not recommend workspace kits.
 
 == Notes
 

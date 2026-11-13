@@ -19,11 +19,10 @@ final class FakeSbx {
     private static final String SCRIPT = """
             #!/bin/sh
             d="$(cd "$(dirname "$0")" && pwd)"
-            printf '%s\\n' "$*" >> "$d/calls.log"
+            # `secret set-custom --value-stdin` gets its value on stdin; record it next to the argv.
+            case " $* " in *" --value-stdin "*) stdin=" <stdin:$(cat)>" ;; *) stdin="" ;; esac
+            printf '%s\\n' "$*$stdin" >> "$d/calls.log"
             case "$1" in ls|secret|policy) cmd="$1" ;; *) cmd=other ;; esac
-            if [ -f "$d/$cmd.failfor" ] && printf '%s' " $* " | tr ',' ' ' | grep -q -F " $(cat "$d/$cmd.failfor") "; then
-              echo "fake sbx: refused $(cat "$d/$cmd.failfor")"; exit 1
-            fi
             [ -f "$d/$cmd.out" ] && cat "$d/$cmd.out"
             exit "$(cat "$d/$cmd.exit" 2>/dev/null || echo 0)"
             """;
@@ -65,16 +64,6 @@ final class FakeSbx {
         return respond("ls", 0, json);
     }
 
-    /** `sbx policy ...` fails (exit 1) whenever its argv names this host, alone or inside a comma-separated list. */
-    FakeSbx failPolicyFor(String host) {
-        try {
-            Files.writeString(dir.resolve("policy.failfor"), host);
-            return this;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     /** `command` is the first sbx argument: ls, secret or policy. */
     FakeSbx respond(String command, int exitCode, String output) {
         try {
@@ -87,7 +76,7 @@ final class FakeSbx {
     }
 
     /**
-     * The identity token (the {@code --value}) from the most recent
+     * The identity token (what {@code --value-stdin} read) from the most recent
      * {@code secret set-custom --sandbox <name> ...} call, or null if there was none. Lets a test
      * learn the token the daemon minted for a sandbox - the same value the sbx proxy would then
      * substitute into that sandbox's identity header.
@@ -97,16 +86,26 @@ final class FakeSbx {
         String token = null;
         for (String call : calls()) {
             if (call.startsWith(marker)) {
-                int i = call.indexOf("--value ");
-                if (i >= 0) {
-                    token = call.substring(i + "--value ".length()).trim();
+                String value = stdinOf(call);
+                if (value != null) {
+                    token = value;
                 }
             }
         }
         return token;
     }
 
-    /** Every invocation so far, as its space-joined argv (without the binary itself). */
+    /** The value a call (or the daemon's dry-run output) carried on stdin: {@code ... <stdin:VALUE>}. */
+    static String stdinOf(String call) {
+        int i = call.indexOf("<stdin:");
+        int end = call.lastIndexOf('>');
+        return i < 0 || end < i ? null : call.substring(i + "<stdin:".length(), end);
+    }
+
+    /**
+     * Every invocation so far, as its space-joined argv (without the binary itself); a call that
+     * read a value from stdin has {@code  <stdin:VALUE>} appended.
+     */
     List<String> calls() {
         try {
             Path log = dir.resolve("calls.log");

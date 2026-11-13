@@ -7,10 +7,11 @@ plugins {
 dependencies {
     implementation(libs.jackson.databind)
     implementation(libs.jackson.datatype.jsr310)
-    implementation(libs.jackson.dataformat.yaml)       // the project host-set file and profiles (projecthosts)
     implementation(libs.javalin)
     implementation(libs.mcp.sdk)
     implementation(libs.slf4j.simple)
+    // Positions in ~/.sbxenv.yaml for `config user-defaults` (comment-preserving splices); compose only.
+    implementation(libs.snakeyaml.engine)
     // Only for McpSchemaReflectionFeature, which native-image runs at build time; never loaded on the JVM.
     compileOnly(libs.graalvm.nativeimage)
 
@@ -107,7 +108,7 @@ registerBinaryTest("binaryTestNative", "Contract tests against the native binary
     inputs.file(nativeBinary)
 }
 
-// Launcher tests (scripts/testing/test-launcher.sh, spec 0001 slice 2): scripts/goversbx `run` against
+// Launcher tests (scripts/testing/test-launcher.sh): scripts/goversbx `run` against
 // scripts/testing/fake-sbx and this jar in dry-run, on free ports with a temp state dir.
 val launcherTest = tasks.register<Exec>("launcherTest") {
     group = "verification"

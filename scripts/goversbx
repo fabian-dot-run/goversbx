@@ -1,40 +1,43 @@
 #!/usr/bin/env bash
-# Host-side launcher: makes sure the goversbx daemon is running, then starts a sandbox with the
-# goversbx kit. A kit can't do this itself - kit hooks run inside the sandbox, the daemon needs the
-# host's sbx CLI and must stay outside the sandbox's control.
+# goversbx: human-approved network access for agents in Docker Sandboxes. This is the host-side
+# command: it keeps the goversbx daemon running, keeps the goversbx kit in sbx's user defaults
+# (~/.sbxenv.yaml) and starts sandboxes through `sbx env`. Every verb it does not know is sbx's.
 #
-#   goversbx run [--goversbx-kit claude|pi|omp|opencode] [sbx run args...]
-#       Starts the daemon if it isn't running, creates the sandbox (`sbx create --kit <kit> <args...>`),
-#       registers it with the daemon so the project's host set (.goversbx/network.yaml) is waiting
-#       in the dashboard, then attaches (`sbx run <name>`).
-#       Examples:  goversbx run claude ~/my-project
-#                  goversbx run --name my-sb claude ~/my-project
-#                  goversbx run --goversbx-kit pi --name pi-sb shell ~/my-project
-#       --kit is only added for a NEW sandbox: if the sandbox named by --name (or by the first
-#       positional argument) already exists, the args go to `sbx run` unchanged. To put the goversbx
-#       kit on an existing sandbox you must recreate it (`sbx rm <name>` then create with --kit):
-#       `sbx kit add` does NOT work for goversbx kits, because they ship files and its recreate flow
-#       doesn't apply a kit's files.
-#   goversbx start     start the daemon in the background (no-op if already running)
-#   goversbx stop      stop a daemon started by this script
-#   goversbx status    daemon state, ports, log location
-#   goversbx logs      follow the daemon log
-#   goversbx dashboard open the admin UI in your default browser
-#   goversbx version   installed release version ("dev" in a repo checkout)
+#   goversbx run [--agent A] [--name N] [--force] [-- AGENT ARGS...]
+#       In the project directory: starts the daemon if needed, checks the user defaults (setup),
+#       writes sbxenv.yaml if there is none (init), creates the sandbox with `sbx env create` (sbx
+#       shows its plan and asks; --force approves), registers it with the daemon and attaches with
+#       `sbx env run`. An existing sandbox is just attached. More flags: `goversbx env run ...`.
+#   goversbx init [--agent A]
+#       Writes ./sbxenv.yaml (schemaVersion, workspace: .) if the directory has none.
+#   goversbx setup [--agent A] [--check] [--quiet]
+#       Keeps exactly one goversbx kit entry in ~/.sbxenv.yaml (path of this install, daemonPort if
+#       not 8787) and asks once for the default agent. --check only reports (exit 2 on findings).
+#   goversbx start      start the daemon in the background (no-op if already running)
+#   goversbx stop       stop a daemon started by this script
+#   goversbx status     daemon state, ports, log location, state of the user defaults
+#   goversbx logs       follow the daemon log
+#   goversbx dashboard  open the admin UI in your default browser
+#   goversbx version    installed release version ("dev" in a repo checkout)
+#   goversbx upgrade    (comes with the next release) how to add the kit to an existing sandbox
+#   goversbx sbx ARGS   runs `sbx ARGS` - the way to the sbx verbs goversbx has too:
+#                       run, stop, setup, version, help   (e.g. `goversbx sbx stop my-sandbox`)
+#   goversbx <other>    runs `sbx <other> ...` unchanged (ls, policy, env, kit, exec, rm, ...)
 #
 # The daemon keeps running after the sandbox session ends - it serves every sandbox; stop it with
 # `goversbx stop` (or `brew services stop goversbx` if Homebrew started it). It runs for real
 # (GOVERSBX_SBX_DRY_RUN=false) unless you set that yourself; every other GOVERSBX_* variable is
-# passed through to it (see README).
+# passed through to it (see README). To remove goversbx from sbx, delete its entry under `kits:`
+# in ~/.sbxenv.yaml.
 #
 # Two layouts: installed (Homebrew or the release tarball) runs the native `goversbx-daemon` binary
 # next to this script, with kits in ../share/goversbx/kits; a repo checkout (scripts/goversbx) runs
 # the JVM jar instead and (re)builds it with Gradle when it is missing or older than daemon/ sources.
 #
-# Knobs: SBX=sbx, GOVERSBX_KIT=claude (default kit), GOVERSBX_STATE_DIR=~/.local/state/goversbx
+# Knobs: SBX=sbx, GOVERSBX_STATE_DIR=~/.local/state/goversbx
 # (pid file + daemon.log), GOVERSBX_SANDBOX_API_PORT=8787, GOVERSBX_ADMIN_PORT=8788,
 # GOVERSBX_DAEMON_BIN / GOVERSBX_KITS_DIR (override where the daemon binary and the kits are).
-# Needs: sbx, curl; java (21+) only in a repo checkout. bash 3.2 compatible (macOS).
+# Needs: sbx >= 0.51, curl; java (21+) only in a repo checkout. bash 3.2 compatible (macOS).
 
 set -u
 
@@ -85,7 +88,7 @@ healthy() {
 port_taken() { curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$1/"; [ $? -ne 7 ]; }
 
 build_if_needed() {
-  if [ -f "$JAR" ] && [ -z "$(find "$REPO_DIR/daemon/src" "$REPO_DIR/daemon/build.gradle.kts" -newer "$JAR" -print -quit)" ]; then
+  if [ -f "$JAR" ] && [ -z "$(find "$REPO_DIR/daemon/src/main" "$REPO_DIR/daemon/build.gradle.kts" -newer "$JAR" -print -quit)" ]; then
     return 0
   fi
   say "building the daemon jar ..."
@@ -101,7 +104,7 @@ start_daemon() {
       || say "daemon already running (not started by this script), admin UI $ADMIN"
     # A daemon started before the last code change keeps running the old build.
     if [ -z "$DAEMON_BIN" ] && [ -f "$PID_FILE" ] && { [ "$JAR" -nt "$PID_FILE" ] \
-         || [ -n "$(find "$REPO_DIR/daemon/src" "$REPO_DIR/daemon/build.gradle.kts" -newer "$PID_FILE" -print -quit)" ]; }; then
+         || [ -n "$(find "$REPO_DIR/daemon/src/main" "$REPO_DIR/daemon/build.gradle.kts" -newer "$PID_FILE" -print -quit)" ]; }; then
       say "WARNING: the running daemon is older than the daemon code - restart it: scripts/goversbx stop && scripts/goversbx start"
     fi
     return 0
@@ -170,114 +173,201 @@ sandbox_exists() { # $1 = name
   "$SBX" ls --format json 2>/dev/null | grep -q "\"name\": *\"$1\""
 }
 
-sandbox_names() { # every sandbox name `sbx ls` reports, one per line
-  "$SBX" ls --format json 2>/dev/null | grep -o '"name": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/'
-}
-
-# Name of the sandbox `sbx run <args>` refers to: the value of --name, else the first positional arg.
-target_sandbox() {
-  local first=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --name) echo "${2:-}"; return ;;
-      --name=*) echo "${1#--name=}"; return ;;
-      -*) ;;
-      *) [ -z "$first" ] && first="$1" ;;
-    esac
-    shift
-  done
-  echo "$first"
-}
-
-name_flag() { # the value of --name, or nothing
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --name) echo "${2:-}"; return ;;
-      --name=*) echo "${1#--name=}"; return ;;
-    esac
-    shift
-  done
-}
-
 admin_token() {
   if [ -n "${GOVERSBX_ADMIN_TOKEN:-}" ]; then echo "$GOVERSBX_ADMIN_TOKEN"
   elif [ -f "$STATE_DIR/admin-token" ]; then cat "$STATE_DIR/admin-token" 2>/dev/null; fi
 }
 
-# Spec 0001 slice 2: ask the daemon for the sandbox's project host set and print what it says. The
-# daemon formats the lines (?format=text); this only prints them. Never fails the caller: a problem
-# is one warning line, and slice 1's reactive registration remains the fallback.
-#   $1 = sandbox name, $2 = "register" to register it first (new sandbox), $3 = "quiet404"
-host_set_summary() {
-  local name="$1" token body code
+# Registers a new sandbox's identity secret with the daemon before the agent starts, so its first
+# request needs no "registering it now, please retry" round. Never fails the caller: a problem is
+# one warning line, and the daemon's reactive registration on the first call remains the fallback.
+#   $1 = sandbox name
+register_sandbox() {
+  local name="$1" token code
   token="$(admin_token)"
-  [ -n "$token" ] || { say "WARNING: no admin token in $STATE_DIR - project host set not requested now (it will be on the agent's first call)"; return 0; }
-  if [ "${2:-}" = register ]; then
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST -H "Authorization: Bearer $token" \
-      "$ADMIN/api/sandboxes/$name/register" 2>/dev/null)"
-    [ "$code" = 200 ] || { say "WARNING: could not register $name with the daemon (HTTP ${code:-none}) - project host set not requested now"; return 0; }
-  fi
-  body="$(curl -s -w '\n%{http_code}' --max-time 30 -X POST -H "Authorization: Bearer $token" \
-    "$ADMIN/api/sandboxes/$name/host-set-requests?format=text" 2>/dev/null)"
-  code="$(printf '%s\n' "$body" | tail -n 1)"
-  body="$(printf '%s\n' "$body" | sed '$d')"
-  case "$code" in
-    200|201|400) [ -z "$body" ] || printf '%s\n' "$body" | while IFS= read -r line; do say "$line"; done ;;
-    404) [ "${3:-}" = quiet404 ] || say "WARNING: the daemon does not know $name - project host set not requested now" ;;
-    *) say "WARNING: project host set not requested now (daemon answered HTTP ${code:-none})" ;;
-  esac
+  [ -n "$token" ] || { say "WARNING: no admin token in $STATE_DIR - $name not registered now (it will be on the agent's first call)"; return 0; }
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST -H "Authorization: Bearer $token" \
+    "$ADMIN/api/sandboxes/$name/register" 2>/dev/null)"
+  [ "$code" = 200 ] || say "WARNING: could not register $name with the daemon (HTTP ${code:-none}) - it will be registered on the agent's first call"
   return 0
 }
 
+# ---- user defaults, project file, sbx env (spec 0003 slice 3) ----
+
+MIN_SBX="0.51"
+KIT_DIR="$KITS_DIR/goversbx"
+
+# The file work lives in the daemon binary (`goversbx-daemon config ...`); no daemon is started.
+config_cmd() {
+  if [ -n "$DAEMON_BIN" ]; then
+    "$DAEMON_BIN" config "$@"
+  else
+    command -v java >/dev/null 2>&1 || die "java not found on PATH (JDK 21+ needed in a repo checkout)"
+    mkdir -p "$STATE_DIR"
+    build_if_needed
+    # A JVM announces JAVA_TOOL_OPTIONS on stderr; that is not part of the answer.
+    (unset JAVA_TOOL_OPTIONS; java -jar "$JAR" config "$@")
+  fi
+}
+
+valid_agent() { # $1 = name
+  case "$1" in ""|[!A-Za-z0-9]*|*[!A-Za-z0-9._/:@-]*) return 1 ;; esac
+}
+
+require_sbx() { # sbx on PATH and new enough for v3 kits and `sbx env`
+  local raw v major minor
+  command -v "$SBX" >/dev/null 2>&1 || die "'$SBX' not found on PATH"
+  raw="$("$SBX" version 2>/dev/null | head -n 1)"
+  v="$(printf '%s\n' "$raw" | sed -n 's/^[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+  major="${v%%.*}"; minor="${v#*.}"
+  case "$major$minor" in ""|*[!0-9]*) die "sbx $MIN_SBX or newer is needed, found ${raw:-nothing from '$SBX version'}" ;; esac
+  if [ "$major" -lt "${MIN_SBX%%.*}" ] || { [ "$major" -eq "${MIN_SBX%%.*}" ] && [ "$minor" -lt "${MIN_SBX#*.}" ]; }; then
+    die "sbx $MIN_SBX or newer is needed, found $v"
+  fi
+}
+
+ask_agent() { # prints the answer; only called on a terminal
+  local answer
+  while :; do
+    printf 'goversbx: which agent should new sandboxes start by default?\n' >&2
+    printf '  e.g. claude, codex, opencode, copilot, kiro, shell - or a kit agent such as omp\n' >&2
+    printf 'Default agent for new sandboxes [claude]: ' >&2
+    read -r answer || return 1
+    [ -n "$answer" ] || answer=claude
+    valid_agent "$answer" && { echo "$answer"; return 0; }
+    printf 'goversbx: "%s" is not an agent name\n' "$answer" >&2
+  done
+}
+
+# Keeps the goversbx kit entry (and, once, the default agent) in ~/.sbxenv.yaml.
+#   $1 = agent or "", $2 = "check" or "", $3 = "quiet" or ""
+# Returns the config command's status: 0 ok, 1 unusable file, 2 findings (check), 3 no agent.
+setup_defaults() {
+  local agent="$1" check="$2" quiet="$3" out rc line
+  [ -z "$agent" ] || valid_agent "$agent" || die "not an agent name: $agent"
+  [ -f "$KIT_DIR/goversbx.yaml" ] || die "goversbx kit not found (no $KIT_DIR/goversbx.yaml) - set GOVERSBX_KITS_DIR"
+  require_sbx
+  set -- user-defaults --kit-dir "$KIT_DIR" --port "$SANDBOX_API_PORT"
+  [ -z "$agent" ] || set -- "$@" --agent "$agent"
+  [ -z "$check" ] || set -- "$@" --check
+  out="$(config_cmd "$@")"; rc=$?
+  if [ "$rc" -eq 3 ]; then
+    if [ -t 0 ]; then
+      agent="$(ask_agent)" || return 3
+      out="$(config_cmd "$@" --agent "$agent")"; rc=$?
+    else
+      say "no default agent yet - run: goversbx setup --agent <name>"
+      return 3
+    fi
+  fi
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out" | while IFS= read -r line; do
+      case "$line" in warning:*|note:*) [ -z "$quiet" ] || continue ;; esac
+      say "~/.sbxenv.yaml: $line"
+    done
+  fi
+  return "$rc"
+}
+
+# Writes ./sbxenv.yaml if the directory has none. $1 = agent or "".
+init_project() {
+  local agent="$1" default=""
+  [ -z "$agent" ] || valid_agent "$agent" || die "not an agent name: $agent"
+  if [ -f sbxenv.yaml ]; then
+    [ -z "$agent" ] || die "sbxenv.yaml exists - set agent: in sbxenv.yaml"
+    say "sbxenv.yaml exists - left as it is"
+    return 0
+  fi
+  [ ! -e .sbxenv.yaml ] || say "sbx does not read .sbxenv.yaml in a project - writing sbxenv.yaml next to it"
+  [ -z "$agent" ] || default="$(config_cmd user-defaults --print-agent)"
+  {
+    echo 'schemaVersion: "1"'
+    [ -z "$agent" ] || [ "$agent" = "$default" ] || echo "agent: $agent"
+    echo 'workspace: .'
+    echo '# kits:               # project mixins; goversbx itself comes from ~/.sbxenv.yaml'
+    echo '#   - docker.io/sbx/playwright:1.61.1'
+  } > sbxenv.yaml || die "could not write sbxenv.yaml in $PWD"
+  say "wrote sbxenv.yaml"
+}
+
 run_sandbox() {
-  local kit="${GOVERSBX_KIT:-claude}" kit_dir target name before out status
-  if [ "${1:-}" = --goversbx-kit ]; then kit="${2:?--goversbx-kit needs claude, pi, omp or opencode}"; shift 2; fi
-  kit_dir="$KITS_DIR/goversbx-$kit"
-  [ -f "$kit_dir/spec.yaml" ] || die "unknown kit '$kit' (no $kit_dir/spec.yaml)"
-  [ $# -gt 0 ] || die "usage: goversbx run [--goversbx-kit claude|pi|omp|opencode] [sbx run args...]  e.g. run claude ~/my-project"
+  local agent="" name="" force="" plan rc sandbox source
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent) [ $# -ge 2 ] || die "--agent needs a value"; agent="$2"; shift 2 ;;
+      --agent=*) agent="${1#--agent=}"; shift ;;
+      --name) [ $# -ge 2 ] || die "--name needs a value"; name="$2"; shift 2 ;;
+      --name=*) name="${1#--name=}"; shift ;;
+      --force|-f) force=1; shift ;;
+      --) break ;;
+      -*) die "'run' knows --agent, --name and --force - for '$1' use 'goversbx env run ...', which passes everything to sbx" ;;
+      *) die "'run' takes no agent or path any more - cd into the project and run 'goversbx run' (plain sbx: 'goversbx sbx run ...')" ;;
+    esac
+  done
+  # What is left is empty or "-- AGENT ARGS...", exactly what `sbx env run` takes last.
+  [ -z "$agent" ] || valid_agent "$agent" || die "not an agent name: $agent"
+  [ -z "$agent" ] || [ ! -f sbxenv.yaml ] || die "sbxenv.yaml exists - set agent: in sbxenv.yaml"
 
   start_daemon || exit 1
+  setup_defaults "" "" quiet || exit $?
+  [ -f sbxenv.yaml ] || init_project "$agent"
 
-  target="$(target_sandbox "$@")"
-  if [ -n "$target" ] && sandbox_exists "$target"; then
-    say "sandbox $target already exists - starting it as-is, without the goversbx kit."
-    say "To apply the kit, recreate it: sbx rm $target  &&  goversbx run <same args>  ('sbx kit add' can't apply goversbx kits - they ship files)."
-    # A changed project file raises its new hosts now; a sandbox the daemon never registered is skipped silently.
-    host_set_summary "$target" "" quiet404
-    exec "$SBX" run "$@"
-  fi
+  for source in $(config_cmd project-kits --file sbxenv.yaml 2>/dev/null); do
+    case "${source%/}" in */kits/goversbx)
+      say "WARNING: sbxenv.yaml lists the goversbx kit too - remove it there, it comes from ~/.sbxenv.yaml" ;;
+    esac
+  done
 
-  # New sandbox: create -> register (raises the project host set) -> attach, so the set is waiting in
-  # the dashboard before the agent starts (spec 0001 slice 2). Verified on sbx 0.49.1: a secret set
-  # right after `sbx create` is substituted on the sandbox's first call.
-  before="$(sandbox_names)"
-  # sbx's progress (image pull, kit install) is shown live and kept for the name lookup below.
-  mkdir -p "$STATE_DIR"
-  local create_log="$STATE_DIR/create.$$.log"
-  if [ "$SANDBOX_API_PORT" = 8787 ]; then
-    "$SBX" create --kit "$kit_dir" "$@" 2>&1 | tee "$create_log"; status=${PIPESTATUS[0]}
-  else
-    "$SBX" create --kit "$kit_dir" --kit-arg "goversbx-$kit.daemonPort=$SANDBOX_API_PORT" "$@" 2>&1 | tee "$create_log"; status=${PIPESTATUS[0]}
-  fi
-  out="$(cat "$create_log" 2>/dev/null)"; rm -f "$create_log"
-  [ "$status" -eq 0 ] || exit "$status"
+  # The sandbox's name is sbx's to decide (--name, the file's name:, a derived default): read it
+  # from the plan. Never a path argument - sbx would skip ~/.sbxenv.yaml and the kit with it.
+  plan="$("$SBX" env plan ${name:+--name "$name"} 2>&1)"; rc=$?
+  [ "$rc" -eq 0 ] || { printf '%s\n' "$plan" >&2; exit "$rc"; }
+  sandbox="$(printf '%s\n' "$plan" | sed -n 's/^ *Name:  *\([^ ]*\) *$/\1/p' | head -n 1)"
 
-  name="$(name_flag "$@")"
-  [ -n "$name" ] || name="$(printf '%s\n' "$out" | sed -n 's/.*Created sandbox \([^ ]*\).*/\1/p' | tail -n 1)"
-  [ -n "$name" ] || name="$(sandbox_names | grep -vxF "$before" | head -n 1)"
-  if [ -n "$name" ]; then
-    host_set_summary "$name" register
-    exec "$SBX" run "$name"
+  if [ -z "$sandbox" ]; then
+    say "WARNING: could not read the sandbox name from 'sbx env plan' - it will be registered on the agent's first call"
+  elif ! sandbox_exists "$sandbox"; then
+    # New sandbox: create -> register -> attach, so the identity secret is in place before the
+    # agent starts. sbx shows its plan here and asks for approval on a terminal.
+    "$SBX" env create ${name:+--name "$name"} ${force:+--force} || exit $?
+    register_sandbox "$sandbox"
   fi
-  say "WARNING: could not tell the new sandbox's name - project host set not requested now"
-  exec "$SBX" run "$@"
+  exec "$SBX" env run ${name:+--name "$name"} ${force:+--force} "$@"
+}
+
+usage() {
+  sed -n '2,40p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   run) run_sandbox "$@" ;;
+  init)
+    agent=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --agent) [ $# -ge 2 ] || die "--agent needs a value"; agent="$2"; shift 2 ;;
+        --agent=*) agent="${1#--agent=}"; shift ;;
+        *) die "usage: goversbx init [--agent A]" ;;
+      esac
+    done
+    init_project "$agent" ;;
+  setup)
+    agent=""; check=""; quiet=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --agent) [ $# -ge 2 ] || die "--agent needs a value"; agent="$2"; shift 2 ;;
+        --agent=*) agent="${1#--agent=}"; shift ;;
+        --check) check=check; shift ;;
+        --quiet) quiet=quiet; shift ;;
+        *) die "usage: goversbx setup [--agent A] [--check] [--quiet]  (sbx's own setup: goversbx sbx setup)" ;;
+      esac
+    done
+    setup_defaults "$agent" "$check" "$quiet"; exit $? ;;
   start) start_daemon ;;
-  stop) stop_daemon ;;
+  stop)
+    [ $# -eq 0 ] || die "'goversbx stop' stops the goversbx daemon - to stop sandboxes: goversbx sbx stop $*"
+    stop_daemon ;;
   status)
     if healthy; then
       pid="$(daemon_pid)" || pid="unknown (not started by this script)"
@@ -285,11 +375,29 @@ case "$cmd" in
     else
       echo "not running"
     fi
-    echo "admin UI: $ADMIN   sandbox port: $SANDBOX_API_PORT   log: $LOG_FILE" ;;
+    echo "admin UI: $ADMIN   sandbox port: $SANDBOX_API_PORT   log: $LOG_FILE"
+    if [ -n "$DAEMON_BIN" ] || [ -f "$JAR" ]; then
+      findings="$(config_cmd user-defaults --kit-dir "$KIT_DIR" --port "$SANDBOX_API_PORT" --check 2>/dev/null)"
+      case $? in
+        0) echo "user defaults: ok" ;;
+        2) echo "user defaults: $(printf '%s\n' "$findings" | grep -c -v -e '^warning:' -e '^note:') finding(s) - run goversbx setup" ;;
+        *) echo "user defaults: ~/.sbxenv.yaml cannot be used - see goversbx setup --check" ;;
+      esac
+    else
+      echo "user defaults: not checked (the daemon jar is not built yet)"
+    fi ;;
   logs) exec tail -f "$LOG_FILE" ;;
   dashboard) open_dashboard ;;
   version|--version)
     if [ -f "$SCRIPT_DIR/../share/goversbx/VERSION" ]; then cat "$SCRIPT_DIR/../share/goversbx/VERSION"
     else echo "dev ($REPO_DIR)"; fi ;;
-  *) sed -n '2,33p' "$SELF" | sed 's/^# \{0,1\}//'; [ -z "$cmd" ] || [ "$cmd" = help ] || [ "$cmd" = -h ] || exit 1 ;;
+  upgrade)
+    say "'upgrade' comes with the next release. Until then, in a terminal: $SBX kit add <sandbox> $KIT_DIR"
+    say "(the sandbox must have been created by sbx >= 0.51; older ones must be recreated)"
+    exit 1 ;;
+  sbx) exec "$SBX" "$@" ;;
+  ""|help|-h|--help)
+    usage
+    if command -v "$SBX" >/dev/null 2>&1; then printf '\n---- sbx --help ----\n'; "$SBX" --help; fi ;;
+  *) exec "$SBX" "$cmd" "$@" ;;
 esac

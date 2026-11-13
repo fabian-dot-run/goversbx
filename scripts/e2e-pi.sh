@@ -7,7 +7,7 @@
 #
 # What it does, each step printed as PASS/FAIL:
 #   1. builds the daemon and starts it for real (GOVERSBX_SBX_DRY_RUN=false)
-#   0. validates the pi kit (`sbx kit validate sandbox-kit/kits/goversbx-pi`)
+#   0. validates the pi kit (`sbx kit validate sandbox-kit/kits/goversbx`)
 #   2. creates two throwaway `shell` sandboxes WITH the kit, installs pi into each via npm
 #   3. checks that the kit's network allow-list lets the sandbox reach the daemon (falls back to an
 #      explicit `sbx policy allow network localhost:<port> --sandbox ...` and reports a FAIL if not)
@@ -61,10 +61,10 @@ PI_TIMEOUT="${PI_TIMEOUT:-300}"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx-pi"
+KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx"
 KIT_ARGS=""
 # The kit defaults to port 8787; only pass --kit-arg when the daemon runs elsewhere.
-[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx-pi.daemonPort=$SANDBOX_API_PORT"
+[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx.daemonPort=$SANDBOX_API_PORT"
 RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
@@ -237,6 +237,10 @@ for sb in $CREATED_SANDBOXES; do
   "$SBX" policy allow network "registry.npmjs.org:443" --sandbox "$sb" >/dev/null 2>&1
   if out="$("$SBX" exec "$sb" sh -c "npm install -g $PI_PACKAGE" 2>&1)"; then
     pass "pi ($PI_PACKAGE) installed in $sb"
+    # The kit registers the endpoint for the agents it finds at create and on every start; this
+    # agent was installed after create, so run the kit's hook once now instead of restarting.
+    "$SBX" exec "$sb" sh /usr/share/goversbx/register-mcp.sh >/dev/null 2>&1 \
+      || fail "the kit's register-mcp.sh failed in $sb"
   else
     echo "$out"; die "npm install -g $PI_PACKAGE failed in $sb - registry.npmjs.org is allowed for $sb, check: $out"
   fi

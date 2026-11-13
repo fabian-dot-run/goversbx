@@ -2,6 +2,8 @@
 
 Guidance for AI coding agents working in this repository. **Start with `docs/status.md`** - the
 current implementation state, what is and isn't verified, the next step, and open questions.
+**What goversbx is for, and how to decide what goes in: `docs/vision.md`** (proactive permission
+gate for cheap project switching, follow sbx where no feature changes fundamentally, easy entry).
 **Features are spec-driven**: a feature starts as a spec under `docs/specs/` (convention in
 `docs/specs/README.md`), is accepted by the user, and is implemented against the spec's
 Given/When/Then scenarios, each of which names the test level that pins it. See
@@ -14,8 +16,8 @@ verified sandbox identity via `sbx secret set-custom` + `sbx ls`).
 `CHANGELOG.md` is the release notes: every user-visible change gets a line in the upcoming version's
 section as part of the change itself, not at release time. `scripts/release-notes.sh <version>`
 prints a version's section; the release workflow publishes it as the GitHub release body and the
-Homebrew formula's caveats link to it. Bump the version in `build.gradle.kts`, the four
-`sandbox-kit/kits/*/spec.yaml` and `McpContext`'s server info together, then push the `v<version>` tag.
+Homebrew formula's caveats link to it. Bump the version in `build.gradle.kts` and
+`McpContext`'s server info together (the v3 kit carries no version), then push the `v<version>` tag.
 
 ## Build & run
 
@@ -29,7 +31,7 @@ Homebrew formula's caveats link to it. Bump the version in `build.gradle.kts`, t
 ./gradlew :daemon:e2eTest            # e2e suite (src/e2eTest) against a REAL signed-in sbx: real daemon, real sandboxes, real policy changes
 scripts/package-release.sh           # everything above + release tarball for this platform
 scripts/testing/record-client-fixtures.sh   # re-record real Claude Code/pi/opencode MCP traffic
-scripts/goversbx run claude ~/ws     # on the HOST: start the daemon if needed, then sbx run --kit ...
+scripts/goversbx run                 # on the HOST, in a project dir: daemon, user defaults, sbxenv.yaml, sbx env create/run
 scripts/e2e-claude.sh                # end-to-end test on a real sbx HOST (not from inside a sandbox)
 scripts/diagnose-substitution.sh     # on the HOST: which `set-custom --host` forms the proxy substitutes
 ```
@@ -99,14 +101,6 @@ why). Internally it is split into bounded contexts under `daemon/src/main/java/r
   `RequestStatus`).
 - **`mcp`** - pure MCP-protocol translation. Has no domain of its own by design - it only adapts
   MCP tool calls into calls on `networkaccess.api`.
-- **`projecthosts`** - turns a workspace's `.goversbx/network.yaml` (plus user profiles from
-  `$XDG_CONFIG_HOME/goversbx/profiles/`) into one host-set request via `networkaccess.api`
-  (spec `docs/specs/0001-project-host-set/`). Thin: `domain` (file rules, resolved set),
-  `application` (`ProjectHostSetService`, port `HostSetSource`), `adapter.file.YamlHostSetSource`
-  (Jackson YAML tree model, strict, no symlinks), `adapter.web` (the explicit admin trigger
-  `POST /api/sandboxes/{name}/host-set-requests`). Triggered by `sandboxidentity`'s registration
-  events (`sandboxidentity.api.SandboxRegistrationListener`), wired in `Main`. Host syntax is judged
-  through `NetworkAccessApi.hostRejectionReason`, never by importing `networkaccess.domain`.
 - **`sandboxidentity`** - registers a sandbox's proxy-verified identity secret, reactively
   (`sbx secret set-custom` + `sbx ls`, see "Sandbox identity" below). No domain - it's a thin
   `application` (+ `port`) → `adapter` wrapper around two `sbx` CLI calls, same shape as
@@ -117,17 +111,31 @@ why). Internally it is split into bounded contexts under `daemon/src/main/java/r
   `mcp` *does* call into this context now (to trigger registration when it sees an unregistered
   sandbox) - same cross-context rule as `networkaccess.api`.
 
+- **`userdefaults`** - not a daemon concern at all: the file work behind `goversbx setup/init/run`
+  (spec 0003 slice 3), run as `goversbx-daemon config ...` and exiting before any listener starts
+  (`Main` dispatches on `args[0]`). It lives in the binary because the launcher is bash and the
+  work needs a YAML parser. `UserDefaultsEditor` is pure text in/out: it owns one `kits` entry of
+  `~/.sbxenv.yaml` (path ending in `/kits/goversbx`) and the `agent` when there is none.
+  **It never re-serializes the user's file**: snakeyaml-engine is used only to find positions
+  (`Compose`, node marks - code points, converted to char offsets), every change is a splice into
+  the original text, a layout it cannot splice (flow-style entry that needs an arg, `kits` not a
+  list, invalid YAML) is refused with `UnusableFileException`, and every result is planned again
+  and must come out clean before it is written. Don't replace this with a load/dump round trip -
+  it would reformat comments and quoting the user wrote. `ConfigCommand` does argv, files (backup,
+  temp + rename, symlink target, mode) and exit codes (0 ok / 1 unusable / 2 drift on `--check` /
+  3 agent needed - nothing is written with 3). The home directory is `$HOME` first, like sbx's Go
+  `os.UserHomeDir`, so both mean the same file (and tests can redirect it).
+
 **The rule**: a bounded context must never import another one's `domain`, `.application`, or
 `.adapter` directly - only its published `.api` package. This is enforced by convention/code
 review, not by the Java module system (JPMS would be real overkill here given Jetty/Reactor aren't
 cleanly modularized). If you add a fourth concern to this daemon, give it the same shape.
 
-`networkaccess`'s aggregate is one request with one or more hosts (`NetworkAccessRequest.getHosts()`,
-`RequestOrigin.AGENT` for the tool's single host, `PROJECT_FILE` for a host set), approved per host
-(`HostGrant`), and the service keeps the hosts granted per sandbox name in memory (`grantedHosts`,
-wiped by `forgetGrants` when a new incarnation registers). The F3 admin-port guard is
-`domain.LocalTargetGuard`, applied by the service on every path (the admin port is a constructor
-argument); the MCP tool no longer has a guard of its own.
+`networkaccess`'s aggregate is one request for exactly one host (`NetworkAccessRequest.getHost()`),
+always pending until a human decides it - the service keeps no memory of earlier grants, so a
+request for a host approved before is asked again. The F3 admin-port guard is
+`domain.LocalTargetGuard`, applied by the service in `hostRejectionReason`/`createRequest` (the
+admin port is a constructor argument); the MCP tool has no guard of its own.
 
 Within `networkaccess`: `domain` has zero framework dependencies (no Javalin, no Jetty, no MCP
 SDK, no `ProcessBuilder`) and owns its own invariants - e.g. `NetworkAccessRequest.approve()`/
@@ -246,6 +254,20 @@ registered through.
   every sandbox. That per-sandbox `--sandbox` scoping keeps them apart is exactly what step 4b of
   `scripts/e2e-claude.sh` checks against a real host - see `docs/status.md` for the fallback if not.
 
+## Launcher (`scripts/goversbx`)
+
+Thin on purpose (spec 0003 D6, `docs/vision.md`): its own verbs are `run`, `init`, `setup`,
+`start`, `stop`, `status`, `logs`, `dashboard`, `version`, `help`, `upgrade` (reserved) and `sbx`;
+**every other first argument is `exec sbx "$@"`** - don't add a verb for something sbx can do.
+`run` = daemon, `setup --quiet`, scaffold, `sbx env plan` (the sandbox **name is read from its
+`Name:` line**, never derived - sbx 0.53 no longer guarantees `<agent>-<dir>`), `sbx env create` +
+register for a new sandbox, `exec sbx env run`. Never pass a path argument to `sbx env`: sbx then
+skips `~/.sbxenv.yaml` and the goversbx kit with it. `run` only knows `--agent`, `--name`,
+`--force`, `-- ARGS`; resist forwarding more flags (`goversbx env run ...` already does). Only
+`sbxenv.yaml` is a project file - sbx does not read a `.sbxenv.yaml` dotfile in a project.
+Tests: `scripts/testing/test-launcher.sh` against `fake-sbx` (which implements `version` and
+`env plan|create|run|rm`) with `HOME` pointed at a temp directory.
+
 ## Testing conventions
 
 - Unit tests (`networkaccess/domain`, `networkaccess/application`): plain JUnit 5, no Javalin/Jetty
@@ -312,65 +334,75 @@ Central).
 
 ## Sandbox kit
 
-`sandbox-kit/kits/goversbx-<agent>/` are real sbx **v2 mixin kits** (`spec.yaml` + `files/`, spec:
-`docker/sbx-kits-contrib` `spec/SPEC-v2.md`), applied at create time:
-`sbx create --kit sandbox-kit/kits/goversbx-claude --name N claude <ws>` (or `sbx run --kit ...`;
-a git URL or the zips from `packageKits` work too). **`sbx kit add` can't apply a goversbx kit** to an
-existing sandbox - every kit ships `files` (the skill, and the pi/omp register scripts) and the
-kit-add recreate flow doesn't apply a kit's files (`error: kit "…" declares files…`); recreate the
-sandbox (`sbx rm` + `sbx create --kit`) instead. The
-daemon is agent-agnostic - anything that speaks MCP over Streamable HTTP and sends the placeholder
-header works - so adding an agent means adding a kit here, not touching `daemon/`.
+`sandbox-kit/kits/goversbx/` is ONE real sbx **v3 mixin kit** for every agent (`goversbx.yaml` +
+`goversbx.dockerfile` + `stage/`; spec: `docker/sandbox-kit-spec`), needs sbx >= 0.51 - since 0.51
+the built-in agents are v3 kits and v1/v2 kits cannot be combined with them, which is why the four
+v2 kits (`goversbx-claude|pi|omp|opencode`) are gone. Applied at create time
+(`sbx create claude --kit sandbox-kit/kits/goversbx --name N <ws>`, or as an entry under `kits:` in
+`~/.sbxenv.yaml` for `sbx env`), or added to an existing all-v3 sandbox with
+`sbx kit add <name> <kit dir>` - that asks to approve the kit's network rules and needs a terminal
+(no flag skips it). sbx builds the source directory on the host with its kit builder. The daemon is
+agent-agnostic - anything that speaks MCP over Streamable HTTP and sends the placeholder header
+works - so adding an agent means adding a section to `register-mcp.sh`, not touching `daemon/`.
+Design and measurements: `docs/specs/0003-sbx-env-native/epic.md` (Evidence E1-E19).
 
-- A kit must be self-contained (`files/` may not point outside it), so each kit carries a **copy**
+- **Stay inside what `sbx kit add` can apply**: network allow rules, a bundled skill, install and
+  startup hooks, agent context. No `credential@1`, `volume@1`, `port@1`, lifecycle `files`, deny
+  rules - any of those makes the kit create-only.
+- The payload lives under `/usr/share/goversbx/` (a prefix no other kit names), staged from
+  `stage/` by a dockerfile with no base image (`FROM scratch` + `COPY --chmod`), so the build needs
+  no pull. A v3 kit has no `files/` channel - content only comes from its dockerfile.
+- The kit must be self-contained (its build context is the kit directory), so it carries a **copy**
   of the shared skill. The source of truth is `sandbox-kit/skill/goversbx-network-access/`; after
-  editing it run `./gradlew :sandbox-kit:syncKitSkills`. `check` fails (`verifyKitSkills`) if a
+  editing it run `./gradlew :sandbox-kit:syncKitSkills`. `check` fails (`verifyKitSkills`) if the
   copy has drifted.
-- Every kit declares the same two args, `daemonHost` (default `host.docker.internal`) and
-  `daemonPort` (default `8787`), and allows `localhost:<port>` plus `<daemonHost>:<port>` in
-  `permissions.network.allow` - the sbx proxy matches sandbox traffic to `host.docker.internal`
-  as `localhost`. Override with `--kit-arg goversbx-claude.daemonPort=...`.
-- None of the kits starts the daemon, and none can: kit hooks run inside the sandbox, while the
-  daemon needs the host's `sbx` CLI and is the approval authority the sandbox must not control.
-- `goversbx-claude` (`requires: {agent: claude}`) registers with `claude mcp add --transport http
-  --header ... --scope user || true` at **install** time as `agent` - the same race-free pattern the
-  sbx `claude` kit uses for `mcp-gateway` (startup commands run from a detached dispatcher and can
-  land after the session read its config) - plus an add-only startup fallback. Skill:
-  `files/home/.claude/skills/`. A second install command writes a marker-wrapped "use goversbx for
-  blocked hosts" rule into `~/.claude/CLAUDE.md` (user memory, always loaded): the sandbox's own
-  `CLAUDE.md` tells Claude to ask the user to run `sbx policy approval`, and on a real host Claude
-  followed that instead of the skill. A mixin's `agentInstructions` don't help here - they only
-  become a pointer under `## Kits` (progressive disclosure), and the AI file plus `kits-memory/`
-  sit next to the workspace, not in it.
-- `goversbx-pi` (pi >= 1.0, MCP in core; sbx has no pi agent, so no `requires` - layer it onto
-  e.g. a `shell` sandbox with pi installed) runs `~/.local/share/goversbx/register-pi-mcp.sh` at
-  startup. It merges a `goversbx-network` entry into `~/.pi/agent/mcp.json` with Node, keeping
-  other entries and failing on a malformed file rather than overwriting it. It uses the user-level
-  file because pi only reads a project's `.pi/mcp.json` after the project is trusted, and
-  `"exposure": "direct"` because pi's default (`codemode`) hides MCP tools from the model's tool
-  list. The JSON is edited directly instead of calling `pi mcp add`, so the script doesn't depend
-  on pi's CLI flags; with pi 1.2.0, `pi mcp add --header ... --exposure direct` writes a
-  byte-identical entry. Without `node` it skips (exit 0). Skill: `files/home/.agents/skills/`.
-- `goversbx-omp` (oh-my-pi) runs `~/.local/share/goversbx/register-omp-mcp.sh` at startup: merges a
-  `"type": "http"` entry into `<agentDir>/mcp.json`. `<agentDir>` is profile-scoped in omp:
-  `~/.omp/agent` by default, `~/.omp/profiles/<name>/agent` under `OMP_PROFILE`/`PI_PROFILE` (omp
-  then ignores the default profile's files), `PI_CODING_AGENT_DIR` overrides the default;
-  `OMP_AGENT_DIR` forces a path. The kit ships the skill to `~/.omp/agent/skills/`; under another
-  profile the script copies it there. omp's `~/.agents/skills` provider is opt-in for user skills,
-  hence the native skills dir. omp runs on Bun, so the merge uses `node` if present, falls back to
-  `bun`, and skips with neither.
+- Args `daemonHost` (default `host.docker.internal`) and `daemonPort` (default `8787`), exported as
+  `GOVERSBX_DAEMON_HOST/_PORT` (`args.<name>.env` - v3 has no `environment:` block); the kit allows
+  `localhost:<port>` plus `<daemonHost>:<port>` - the sbx proxy matches sandbox traffic to
+  `host.docker.internal` as `localhost`. Override with `--kit-arg goversbx.daemonPort=...`.
+- The skill is declared with `agent-skill@1` (`optional`: a workload without a skills directory,
+  e.g. `shell`, would otherwise refuse the kit). The runtime links it into every skills directory
+  the composition declares (`~/.claude/skills`, omp-sbx's `~/.omp/agent/skills`);
+  `register-mcp.sh` links it for agents whose directory the runtime does not know.
+- Exactly ONE `agent-context` version: a kit declaring `@1` and `@2` creates fine but breaks
+  `sbx env run` on the existing sandbox ("competing agent-context versions", sbx 0.51.0).
+- `stage/usr/share/goversbx/register-mcp.sh` is both the install hook (race-free, before the agent
+  reads its config - the pattern the sbx `claude` kit uses for `mcp-gateway`) and the startup hook
+  (add-only fallback; startup hooks run next to a live session). It registers the endpoint for each
+  agent it finds and skips the rest; a malformed existing config fails that agent's step loudly and
+  is never overwritten. An agent installed after create is picked up on the next start, or by
+  running the script once (`sbx exec <name> sh /usr/share/goversbx/register-mcp.sh`).
+  - **Claude Code**: `claude mcp add --transport http --header ... --scope user || true`, plus a
+    marker-wrapped "use goversbx for blocked hosts" rule in `~/.claude/CLAUDE.md` (user memory,
+    always loaded): the sandbox's own `CLAUDE.md` tells Claude to ask the user to run
+    `sbx policy approval`, and on a real host Claude followed that instead of the skill. The kit's
+    agent context does not help here - with `@1` and `@2` alike it only becomes a pointer under
+    `## Kits` to `~/.claude/kits-agent-context/goversbx.md`.
+  - **opencode**: merges a `"type": "remote"` entry into `~/.config/opencode/opencode.json` with
+    `jq` (opencode is a standalone binary, no Node guaranteed); skill in `~/.agents/skills`.
+  - **pi** (>= 1.0): merges into the user-level `~/.pi/agent/mcp.json` (a project's `.pi/mcp.json`
+    is only read once trusted) with `"exposure": "direct"` (pi's default hides MCP tools from the
+    model's tool list); skill in `~/.agents/skills`.
+  - **oh-my-pi**: merges a `"type": "http"` entry into `<agentDir>/mcp.json`. `<agentDir>` is
+    profile-scoped: `~/.omp/agent` by default, `~/.omp/profiles/<name>/agent` under
+    `OMP_PROFILE`/`PI_PROFILE`, `PI_CODING_AGENT_DIR` overrides the default, `OMP_AGENT_DIR` forces
+    a path; the skill goes into its `skills/`.
+  - pi and omp merges run with `node`, else `bun` (omp is a Bun app); with neither they are skipped.
+- The endpoint is registered in the agent, NOT through the sbx MCP gateway (`sbx mcp add`): gateway
+  calls start on the host and bypass the sandbox proxy, so the daemon would see the raw placeholder
+  from every sandbox - no identity (measured on 0.49.1 and 0.51.0, also for `command` servers).
+- The kit does not start the daemon, and cannot: kit hooks run inside the sandbox, while the daemon
+  needs the host's `sbx` CLI and is the approval authority the sandbox must not control.
 - The skill names tools without assuming a prefix: pi exposes them as
   `mcp__goversbx-network__<tool>`, omp as `mcp__goversbx_network_<tool>`.
 - Header values are interpreted by some agents: pi and omp expand `${VAR}` and run `!command`,
-  and omp also substitutes a value that is exactly the name of a set env var. Keep the placeholder
-  a plain literal that is none of these.
+  omp also substitutes a value that is exactly the name of a set env var, opencode expands
+  `{env:VAR}`. Keep the placeholder a plain literal that is none of these.
 
-Verification state: the specs parse and resolve their args (checked locally with js-yaml; `sbx kit
-validate` only runs on the host, as step 0 of `scripts/e2e-claude.sh`). The pi and omp scripts'
-config merging is tested against fresh, existing, and malformed configs (plus named profiles and a
-missing JS runtime). The pi merge is verified against real pi 1.2.0 (`pi mcp list` connects and
-lists both tools as `direct`, the placeholder header is sent verbatim, pi's resource loader
-discovers the skill); the omp script has not been run against a real omp installation. The
-`goversbx-claude` kit passed the full host e2e (2026-10-14); the pi and omp kits have not been
-applied with real `sbx` yet. Note that pi's exported `loadSkills()` does not scan
-`~/.agents/skills` - use `DefaultResourceLoader` if you ever re-check skill discovery that way.
+Verification state (2026-11-10, sbx 0.51.0 in the nested dev sandbox): the kit builds and composes
+with the `claude`, `opencode` and `shell` workloads; Claude and opencode registration, skill link,
+args and the `CLAUDE.md` rule were checked inside real sandboxes; `sbx kit add` onto an existing
+claude sandbox worked. `register-mcp.sh` was run against a fake home for all four agents (fresh,
+existing, malformed config, rerun changes nothing). **Not verified with the v3 kit**: real pi and
+real omp (the scripts `scripts/e2e-pi.sh`/`e2e-omp.sh`/`e2e-opencode.sh`/`e2e-claude.sh` were only
+adapted mechanically and not rerun), and composition with omp-sbx's `omp` + `omlx-mixin`.

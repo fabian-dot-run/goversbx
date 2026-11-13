@@ -1,0 +1,78 @@
+# syntax=docker/sandbox-kit:3
+# The goversbx mixin for every agent (sbx kit v3, needs sbx >= 0.51). Layer it onto any workload:
+#   sbx create claude --kit <this dir> ...        or, once, in ~/.sbxenv.yaml under `kits:`
+# It only touches what `sbx kit add` can apply (network allow rules, a bundled skill, install and
+# startup hooks, agent context) - no credentials, volumes, ports or generated files - so it can also
+# be added to an existing all-v3 sandbox (`goversbx upgrade`). Keep it that way.
+schemaVersion: "3"
+kind: mixin
+displayName: goversbx network access
+description: >-
+  Lets the agent request outbound network access through the goversbx daemon running on the host,
+  with a human approving each host. Registers the daemon's MCP endpoint with the agent found in the
+  sandbox (Claude Code, opencode, pi, oh-my-pi) and brings the goversbx-network-access skill.
+  Does not start the daemon - it must already run on the host.
+
+args:
+  daemonHost:
+    default: "host.docker.internal"
+    description: "Hostname under which the sandbox reaches the goversbx daemon on the host"
+    pattern: '^[A-Za-z0-9.-]+$'
+    env: GOVERSBX_DAEMON_HOST
+  daemonPort:
+    default: "8787"
+    description: "The daemon's sandbox-facing port (GOVERSBX_SANDBOX_API_PORT)"
+    pattern: '^[0-9]{1,5}$'
+    env: GOVERSBX_DAEMON_PORT
+
+capabilities:
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          # The sbx proxy sees sandbox traffic to host.docker.internal as localhost (verified with
+          # scripts/diagnose-substitution.sh); the second entry covers a daemonHost that is not
+          # host.docker.internal.
+          - "localhost:${{ kit.args.daemonPort }}"
+          - "${{ kit.args.daemonHost }}:${{ kit.args.daemonPort }}"
+
+  # Exposed by the runtime in every skills directory the composition declares (agent-skills@1:
+  # ~/.claude/skills, omp-sbx's ~/.omp/agent/skills, ...). Optional, because a workload without
+  # such a directory (shell) would otherwise refuse the kit; register-mcp.sh links the skill for
+  # the agents it finds there.
+  - type: com.docker.sandbox/agent-skill@1
+    optional: true
+    config:
+      path: /usr/share/goversbx/skills/goversbx-network-access
+
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        # Install time, so the registration is in place before the agent reads its config.
+        - command: sh /usr/share/goversbx/register-mcp.sh
+          user: agent
+          env: [GOVERSBX_DAEMON_HOST, GOVERSBX_DAEMON_PORT]
+          description: Register the goversbx-network MCP endpoint with the installed agents
+      startup:
+        # Fallback, and the path for agents installed after create. The script is add-only and
+        # idempotent: startup hooks run next to a live session.
+        - command: sh /usr/share/goversbx/register-mcp.sh
+          user: agent
+          env: [GOVERSBX_DAEMON_HOST, GOVERSBX_DAEMON_PORT]
+          description: Register the goversbx-network MCP endpoint (startup fallback)
+
+  # Exactly ONE agent-context version: a kit declaring @1 and @2 creates fine but breaks
+  # `sbx env run` on the existing sandbox ("competing agent-context versions", sbx 0.51.0).
+  - type: com.docker.sandbox/agent-context@1
+    optional: true
+    config:
+      content: |
+        ## Network access via goversbx
+
+        Outbound network access from this sandbox is restricted. If the sandbox proxy blocks a request
+        (HTTP 403, "Approval required for <host>", "Blocked by network policy"), or you need a host that
+        is probably not allowed yet, call `request_network_access` on the `goversbx-network` MCP server
+        instead of asking the user to run `sbx policy approval ...` / `sbx policy allow ...`: it asks the
+        human on the host, waits for the decision and applies it. Approvals are permanent for this
+        sandbox. Not for "Blocked by org policy" or "Blocked by local rule" (deny rules win). The
+        `goversbx-network-access` skill has the details.

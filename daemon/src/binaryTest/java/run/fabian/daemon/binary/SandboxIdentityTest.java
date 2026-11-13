@@ -32,12 +32,13 @@ class SandboxIdentityTest {
         }
         List<String> secrets = sbx.calls().stream().filter(c -> c.startsWith("secret")).toList();
         assertEquals(1, secrets.size(), secrets.toString());
+        // The token travels on stdin (never in argv, which `ps` shows) and sbx may not prompt.
         // The substituted value is a per-sandbox secret token (gvsbx-<random>), never the name - that
         // is the F1 fix: a value a sandbox could type in by hand (its own or a victim's name) must not
         // resolve to an identity.
         assertTrue(secrets.get(0).matches("secret set-custom --sandbox match-1 --host localhost"
                         + " --env GOVERSBX_SANDBOX_TOKEN --placeholder " + Pattern.quote(DaemonProcess.PLACEHOLDER)
-                        + " --value gvsbx-[A-Za-z0-9_-]+"),
+                        + " --value-stdin --no-input <stdin:gvsbx-[A-Za-z0-9_-]+>"),
                 secrets.get(0));
     }
 
@@ -58,7 +59,7 @@ class SandboxIdentityTest {
         try (DaemonProcess daemon = DaemonProcess.start(sbx, DaemonProcess.env("GOVERSBX_SBX_LS_FORMAT_ARGS", "--json"))) {
             placeholderCall(daemon);
         }
-        assertTrue(sbx.calls().contains("ls --json"), sbx.calls().toString());
+        assertTrue(sbx.calls().contains("ls --json --no-input"), sbx.calls().toString());
     }
 
     @Test

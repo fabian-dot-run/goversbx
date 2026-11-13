@@ -1,6 +1,8 @@
 # Epic 0001: Project host set
 
-Status: accepted (2026-10-23); slice 1 done (v0.3.0), slice 2 done (0.4.0), slice 3 next
+Status: dropped (2026-11-10) - slices 1 and 2 shipped (v0.3.0, 0.4.0) and are being removed again:
+nobody used the feature and its complexity does not pay for the benefit (user decision; the sbx-native
+alternative was measured and rejected, see epic 0003 D10). Slice 3 is never specified.
 
 ## Problem
 

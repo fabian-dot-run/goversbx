@@ -6,7 +6,7 @@
 #
 # What it does, each step printed as PASS/FAIL:
 #   1. builds the daemon and starts it for real (GOVERSBX_SBX_DRY_RUN=false)
-#   0. validates the Claude kit (`sbx kit validate sandbox-kit/kits/goversbx-claude`)
+#   0. validates the Claude kit (`sbx kit validate sandbox-kit/kits/goversbx`)
 #   2. creates two throwaway sandboxes WITH the kit (`sbx create --kit <kit> --name ... claude <ws>`)
 #   3. checks that the kit's network allow-list lets the sandbox reach the daemon (falls back to an
 #      explicit `sbx policy allow network localhost:<port> --sandbox ...` and reports a FAIL if not)
@@ -55,10 +55,10 @@ CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
 PLACEHOLDER="goversbx-sandbox-identity-placeholder-v1"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx-claude"
+KIT_DIR="$REPO_DIR/sandbox-kit/kits/goversbx"
 KIT_ARGS=""
 # The kit defaults to port 8787; only pass --kit-arg when the daemon runs elsewhere.
-[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx-claude.daemonPort=$SANDBOX_API_PORT"
+[ "$SANDBOX_API_PORT" = 8787 ] || KIT_ARGS="--kit-arg goversbx.daemonPort=$SANDBOX_API_PORT"
 RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
@@ -379,9 +379,9 @@ else
     # The sandbox's AI file (with the sbx "When a request is blocked" text) sits next to the
     # workspace, not in it; a mixin's agentInstructions land in kits-memory/ beside it.
     out="$("$SBX" exec -e "WS=$WORKSPACE" "$SANDBOX_NAME" sh -c \
-      'find "$(dirname "$WS")" /home/agent -maxdepth 3 -path "*kits-memory*" -name "goversbx-claude.md" 2>/dev/null | head -3' 2>&1)"
+      'find "$(dirname "$WS")" /home/agent -maxdepth 3 -path "*kits-agent-context*" -name "goversbx.md" 2>/dev/null | head -3' 2>&1)"
     [ -n "$out" ] && info "mixin agent instructions at: $(echo $out)" \
-      || info "mixin agent instructions (kits-memory/goversbx-claude.md) not found - harmless, see ~/.claude/CLAUDE.md rule"
+      || info "mixin agent instructions (kits-agent-context/goversbx.md) not found - harmless, see ~/.claude/CLAUDE.md rule"
 
     # A natural prompt that does NOT mention goversbx, run from the workspace so the sandbox's own
     # CLAUDE.md (which tells Claude to ask the user to approve via sbx) is loaded too: this checks

@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,7 +56,7 @@ class SbxCliContractTest {
     @Test
     void secretSetCustomAcceptsTheFlagsTheDaemonPasses() {
         String help = env.sbx.help("secret", "set-custom").output();
-        for (String flag : new String[] {"--sandbox", "--host", "--env", "--placeholder", "--value"}) {
+        for (String flag : new String[] {"--sandbox", "--host", "--env", "--placeholder", "--value-stdin", "--no-input"}) {
             assertTrue(help.contains(flag), "sbx secret set-custom --help no longer documents " + flag
                     + " (SbxCliCustomSecretAdapter passes it)");
         }
@@ -71,27 +69,34 @@ class SbxCliContractTest {
     }
 
     @Test
-    void policyAllowNetworkTwiceForTheSameHostSucceedsBothTimes() {
-        // Spec 0001 open question 2: the daemon re-requests a sandbox's whole host set after a restart
-        // (grants are in memory), so allowing an already allowed host must not count as a failure.
-        String host = "goversbx-e2e-idempotency-check.invalid";
-        Sbx.Result first = env.sbx.policyAllowNetwork(host, env.a.name);
-        assertTrue(first.ok(), "first sbx policy allow failed:\n" + first.output());
-        Sbx.Result second = env.sbx.policyAllowNetwork(host, env.a.name);
-        assertTrue(second.ok(), "sbx policy allow for an EXISTING rule exits " + second.exit() + " - the daemon would report "
-                + "a re-requested host as failed:\n" + second.output());
-    }
-
-    @Test
     void lsHasTheFormatFlag() {
         assertTrue(env.sbx.help("ls").output().contains("--format"),
                 "sbx ls --help lacks --format (the daemon's default GOVERSBX_SBX_LS_FORMAT_ARGS is '--format json')");
     }
 
-    @ParameterizedTest(name = "kit {0} validates")
-    @ValueSource(strings = {"claude", "pi", "omp", "opencode"})
-    void everyKitValidates(String kit) {
-        Sbx.Result result = env.sbx.kitValidate(env.config.kit(kit));
-        assertTrue(result.ok(), "sbx kit validate goversbx-" + kit + " failed:\n" + result.output());
+    @Test
+    void theKitValidates() {
+        // A v3 source kit: validating it builds it with sbx's kit builder (sbx >= 0.51).
+        Sbx.Result result = env.sbx.kitValidate(env.config.kit());
+        assertTrue(result.ok(), "sbx kit validate " + env.config.kit() + " failed:\n" + result.output());
+    }
+
+    /** Spec 0003 slice 3, S25: what scripts/goversbx relies on in `sbx env`. */
+    @Test
+    void envPlanPrintsTheSandboxNameAndTheEnvVerbsTakeTheLaunchersFlags() throws Exception {
+        java.nio.file.Path project = java.nio.file.Files.createDirectories(env.config.runDir.resolve("plan-probe"));
+        java.nio.file.Files.writeString(project.resolve("sbxenv.yaml"), "schemaVersion: \"1\"\nagent: shell\nworkspace: .\n");
+
+        // A path argument, so the machine's ~/.sbxenv.yaml plays no part in this check.
+        Sbx.Result plan = env.sbx.run("env", "plan", "--name", "goversbx-plan-probe", project.toString());
+        assertTrue(plan.ok(), "sbx env plan failed:\n" + plan.output());
+        assertTrue(plan.stdout().lines().anyMatch(line -> line.matches(" *Name: +goversbx-plan-probe *")),
+                "sbx env plan no longer prints 'Name:   <sandbox>' on stdout - scripts/goversbx reads the name there:\n" + plan.output());
+
+        for (String verb : new String[] {"create", "run"}) {
+            String help = env.sbx.help("env", verb).output();
+            assertTrue(help.contains("--name") && help.contains("--force"), "sbx env " + verb + " --help lacks --name or --force");
+        }
+        assertTrue(env.sbx.help("env", "plan").output().contains("--name"), "sbx env plan --help lacks --name");
     }
 }

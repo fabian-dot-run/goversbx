@@ -46,7 +46,7 @@ class SbxPolicyAndConcurrencyTest {
             for (int i = 0; i < n; i++) {
                 String text = Mcp.text(calls.get(i).join());
                 assertTrue(text.startsWith("Approved - network access to 'conc-" + i + ".example'"), text);
-                assertTrue(sbx.calls().contains("policy allow network conc-" + i + ".example --sandbox conc-" + i));
+                assertTrue(sbx.calls().contains("policy allow network conc-" + i + ".example --sandbox conc-" + i + " --no-input"));
             }
             assertEquals(200, daemon.get(daemon.admin("/api/health")).statusCode());
         }

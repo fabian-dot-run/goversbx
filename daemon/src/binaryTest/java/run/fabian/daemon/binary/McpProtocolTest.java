@@ -147,7 +147,7 @@ class McpProtocolTest {
         String text = Mcp.text(daemon.mcp(DaemonProcess.PLACEHOLDER).initialize()
                 .callTool("request_network_access", Mcp.args("host", "p.example", "reason", "r")));
         assertTrue(text.contains("registering it now"), text);
-        assertTrue(daemon.sbx.calls().contains("ls --format json"), daemon.sbx.calls().toString());
+        assertTrue(daemon.sbx.calls().contains("ls --format json --no-input"), daemon.sbx.calls().toString());
         assertTrue(daemon.sbx.calls().stream().anyMatch(c -> c.startsWith("secret set-custom --sandbox proto-registered ")),
                 daemon.sbx.calls().toString());
     }

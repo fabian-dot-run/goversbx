@@ -1,6 +1,7 @@
 # Epic 0002: goversbx-omp as a sbx kit v3 mixin
 
-Status: draft (2026-10-24) - **superseded in part, see amendment below**; no slice started
+Status: superseded by epic 0003 (2026-11-10) - sbx 0.51 makes every built-in agent a v3 kit, so all
+goversbx kits move to one v3 mixin there; the analysis below stays as the record
 
 ## Amendment (2026-10-26) - blocker B no longer applies
 

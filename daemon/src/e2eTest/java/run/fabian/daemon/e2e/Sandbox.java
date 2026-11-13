@@ -54,7 +54,7 @@ final class Sandbox {
     }
 
     /**
-     * {@code sbx create --kit <kit> [--kit-arg goversbx-<kit>.daemonPort=N] --name <name> <agent> [<workspace>]}.
+     * {@code sbx create --kit <kit> [--kit-arg goversbx.daemonPort=N] --name <name> <agent> [<workspace>]}.
      * A refused workspace mount (seen on a headless Linux sbx without the admin-settings backend:
      * "mount policy denied") falls back to a workspace-less sandbox and records that.
      */

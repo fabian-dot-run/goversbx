@@ -13,9 +13,6 @@ import run.fabian.daemon.networkaccess.adapter.web.JsonSupport;
 import run.fabian.daemon.networkaccess.application.NetworkAccessService;
 import run.fabian.daemon.networkaccess.application.port.RequestRepository;
 import run.fabian.daemon.networkaccess.application.port.SbxPolicyPort;
-import run.fabian.daemon.projecthosts.adapter.file.YamlHostSetSource;
-import run.fabian.daemon.projecthosts.adapter.web.ProjectHostSetController;
-import run.fabian.daemon.projecthosts.application.ProjectHostSetService;
 import run.fabian.daemon.sandboxidentity.adapter.persistence.FileSandboxRegistrationStore;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliCustomSecretAdapter;
 import run.fabian.daemon.sandboxidentity.adapter.sbx.SbxCliSandboxListAdapter;
@@ -23,6 +20,7 @@ import run.fabian.daemon.sandboxidentity.adapter.web.SandboxIdentityController;
 import run.fabian.daemon.sandboxidentity.application.SandboxIdentityService;
 import run.fabian.daemon.sandboxidentity.application.port.SbxCustomSecretPort;
 import run.fabian.daemon.sandboxidentity.application.port.SbxSandboxListPort;
+import run.fabian.daemon.userdefaults.ConfigCommand;
 import io.javalin.Javalin;
 import io.javalin.json.JavalinJackson;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
@@ -38,6 +36,10 @@ public final class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
+        // `goversbx-daemon config ...` is the file work behind `goversbx setup/init/run`: no daemon.
+        if (args.length > 0 && args[0].equals("config")) {
+            System.exit(new ConfigCommand(System.out, System.err).run(List.of(args).subList(1, args.length)));
+        }
         int sandboxApiPort = intEnv("GOVERSBX_SANDBOX_API_PORT", 8787);
         int adminPort = intEnv("GOVERSBX_ADMIN_PORT", 8788);
         String sandboxApiBind = env("GOVERSBX_SANDBOX_API_BIND", "0.0.0.0");
@@ -54,7 +56,7 @@ public final class Main {
         RequestRepository repository = new InMemoryRequestRepository();
         SbxPolicyPort sbxPolicyPort = new SbxCliPolicyAdapter(sbxBinary, dryRun);
         // The admin port is passed in so the request flow itself refuses a host that points at the
-        // daemon's own admin API (threat-model F3), on every path - agent tool and project file alike.
+        // daemon's own admin API (threat-model F3).
         NetworkAccessService networkAccessService = new NetworkAccessService(repository, sbxPolicyPort, adminPort);
 
         SbxCustomSecretPort sbxCustomSecretPort = new SbxCliCustomSecretAdapter(sbxBinary, dryRun);
@@ -69,14 +71,6 @@ public final class Main {
                 sbxCustomSecretPort, sbxSandboxListPort, registrationStore,
                 identityTargetHost, identityEnvVar, identityPlaceholder, identitySandboxPattern);
         log.info("Sandbox registrations are kept in {}", registrationStore.file());
-
-        // A sandbox created anew under a known name starts with no grants; then its project file
-        // (if any workspace has one) becomes one host-set request. Listener order matters.
-        sandboxIdentityService.subscribe(sandbox -> networkAccessService.forgetGrants(sandbox.name()));
-        YamlHostSetSource hostSetSource = new YamlHostSetSource(DaemonConfig.profilesDir());
-        ProjectHostSetService projectHostSetService = new ProjectHostSetService(hostSetSource, networkAccessService);
-        sandboxIdentityService.subscribe(projectHostSetService::onSandboxRegistered);
-        log.info("Project host sets: <workspace>/.goversbx/network.yaml, profiles in {}", hostSetSource.profilesDir());
 
         McpContext mcp = McpContext.build(networkAccessService, sandboxIdentityService);
 
@@ -99,7 +93,6 @@ public final class Main {
             new AdminApiController(networkAccessService).registerRoutes(cfg.routes);
             eventStream.registerRoutes(cfg.routes);
             new SandboxIdentityController(sandboxIdentityService).registerRoutes(cfg.routes);
-            new ProjectHostSetController(projectHostSetService, sandboxIdentityService).registerRoutes(cfg.routes);
         });
         adminApp.start("127.0.0.1", adminPort);
         log.info("Admin UI + API listening on 127.0.0.1:{} (loopback only, token-gated)", adminPort);

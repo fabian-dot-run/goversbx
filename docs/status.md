@@ -3,6 +3,102 @@
 Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Slice 3 implemented up to `check` (2026-11-13, uncommitted, e2e and native not run)
+
+On top of the uncommitted slices 1 and 2. `./gradlew check` is green.
+
+- `goversbx-daemon config user-defaults|project-kits` (package `userdefaults`,
+  `snakeyaml-engine` for positions only): the comment-preserving edit of `~/.sbxenv.yaml`.
+- `scripts/goversbx` rewritten onto `setup` / `init` / `run` via `sbx env`, pass-through of every
+  other verb, `goversbx sbx ...`; the old `run <agent> <path>` is refused.
+- Tests: `UserDefaultsEditorTest`, `ConfigCommandTest` (unit), `binaryTest`'s `ConfigCommandTest`
+  (contract), `test-launcher.sh` rewritten (19 checks, `fake-sbx` has `version` and `env`), e2e
+  `LauncherSequenceTest` rewritten + `SbxCliContractTest` S25 (**compiled, not run**).
+- Docs: README quick start and verb table, CHANGELOG (Unreleased), Homebrew caveats, AGENTS.md,
+  threat model (goversbx writes sbx's user defaults; the repo-checkout caveat), `docs/vision.md` (new).
+- **Not done**: `:daemon:e2eTest` on sbx 0.53 (S23-S25, and the whole suite there),
+  `binaryTestNative` (S10 + slice 2's stdin path), the version bump to 0.6.0, the blog post's
+  quick start (`docs/blog/goversbx-de.md` still shows `goversbx run claude ~/mein-projekt`).
+
+M10 is measured (slice-3 table): create fails on an existing sandbox, an approval at the prompt is
+remembered, `--force` covers one invocation only - no change to the flow. A first host run of the
+e2e suite on 0.53.0 failed in its setup (`sbx create`: image pull timed out), before any test ran.
+
+**Next**: run `:daemon:e2eTest` when image pulls work again (or on the host), then
+`binaryTestNative` on the host; user reviews and commits slices 1-3; bump to 0.6.0; slice 4.
+
+## Slice 3 spec drafted, sbx 0.53.0 (2026-11-13)
+
+`docs/specs/0003-sbx-env-native/slice-3.md` is a **draft**: `goversbx setup` / `init` / `run` on
+`sbx env`, thin CLI, 25 scenarios. The user accepted all five proposals the same day (keep the
+shadowed verbs + `goversbx sbx ...`, free-text agent question, always scaffold, `run` flags
+`--agent/--name/--force`, sbx >= 0.51); one measurement (M10) is missing before acceptance.
+**sbx 0.53.0 is stable since 2026-11-11** (0.52 skipped, 0.54.0-rc4 out); the dev sandbox's sbx was
+upgraded to it by hand (`dpkg -i`). Its `sbx env plan` behaviour is measured in the slice's table
+(M1-M9). **Not done on 0.53: any sandbox creation and the e2e suite** - the image pull stalled on a
+downlink of a few KB/s that afternoon; the outer policy now also allows Docker Hub's R2 blob host.
+The epic's D2, D4 and D6 carry dated amendments for what the slice corrected.
+
+**Next**: measure M10 and run `:daemon:e2eTest` on 0.53
+when the network allows; slices 1 and 2 are still uncommitted and still await the host run.
+
+## Epic 0003 slices 1 and 2 implemented (2026-11-10, uncommitted working tree)
+
+Epic 0003 is accepted (all questions answered; decisions in its epic.md). Done in the working tree,
+**nothing committed**:
+
+- **Slice 1 - project host sets removed** (`slice-1.md`, done): the `projecthosts` context,
+  `.goversbx/network.yaml`, profiles, `host-set-requests`, multi-host requests and the instant
+  approval of already-granted hosts are gone; a request is one host again.
+- **Slice 2 - one v3 kit** (`slice-2.md`, implementing): `sandbox-kit/kits/goversbx/` replaces the
+  four v2 kits (one `register-mcp.sh` for Claude, opencode, pi, omp; skill via `agent-skill@1`); the
+  launcher uses it and lost `--goversbx-kit`; the daemon passes the identity token with
+  `--value-stdin` and adds `--no-input` to every sbx call. **goversbx now needs sbx >= 0.51.**
+- Verified here: `./gradlew check` green; `./gradlew :daemon:e2eTest` green against sbx 0.51.0 in
+  the nested dev sandbox (5m58s, all classes, `ClaudeAgentTest` skipped).
+- Not verified: `binaryTestNative` (new stdin code path in the native binary); the e2e suite on the
+  macOS host; pi and omp with the v3 kit (`scripts/e2e-*.sh` adapted mechanically, not rerun);
+  composition with omp-sbx's `omp` + `omlx-mixin`; the dashboard in a browser after the removal.
+- The dev sandbox's sbx was upgraded by hand to 0.51.0 (`dpkg -i` of the release .deb).
+
+**Next**: user runs `./gradlew :daemon:e2eTest` and `:daemon:binaryTestNative` on the host and
+reviews the diff; then slice 3 (`goversbx setup` / `init` / `run` via `sbx env`, thin wrapper, old
+`run <agent> <path>` form removed) needs its slice spec, then slice 4 (`upgrade`). Version 0.6.0
+ships with slice 3. Epic 0004 (credential requests, GitLab) is still a draft with five open questions.
+
+## Plan 2026-11-10: sbx 0.50/0.51 changes, epics 0003 and 0004 drafted (nothing implemented)
+
+**sbx 0.51.0 (2026-11-03) breaks goversbx:** built-in agents are now published v3 kits and v1/v2
+kits can no longer be combined with them, so `goversbx run claude ...` and the e2e suite's
+`sbx create --kit goversbx-claude claude` fail on 0.51. The fix and the new usage model are
+`docs/specs/0003-sbx-env-native/epic.md` (draft): one agent-agnostic v3 mixin `goversbx`
+(`agent-skill@1`, `agent-context@2`, one MCP registration script for all agents), kept once in
+`~/.sbxenv.yaml` and checked by `goversbx setup`, `goversbx run` = scaffold `sbxenv.yaml` + `sbx env`,
+`goversbx upgrade` for existing sandboxes of the current directory, every other verb passed to sbx.
+Rides along: `set-custom --value-stdin`, `--no-input`. Epic 0002 is superseded by it.
+`docs/specs/0004-credential-requests/epic.md` (draft) plans the next feature: the agent requests a
+credential (GitLab first), the human approves/narrows, the daemon mints a scoped expiring project
+access token and attaches it to that sandbox via `sbx secret set-custom --sandbox`.
+**Measured the same day (nested sbx 0.49.1): an MCP server registered via `sbx mcp add` and reached
+through the sandbox's MCP gateway gets the identity placeholder RAW** - the gateway calls upstream from
+the host and bypasses the sandbox proxy that substitutes it; the direct path substitutes as always.
+So the kit keeps registering the endpoint in the agent (epic 0003 D8 has the setup and table).
+**sbx 0.51.0 now runs in the nested dev sandbox** (release `.deb` + `dpkg -i`; apt has only 0.49.1) and
+most of epic 0003's slice 0 is measured there (its Evidence table E1-E11): the v2 kits are refused
+with `claude`; a v3 `goversbx` probe kit builds, composes with `claude`, delivers the skill via
+`agent-skill@1`, env via args and MCP via an install hook; identity works on the direct path and is
+lost through the gateway (also for a `command` server); `agent-context@1/@2` only yield a pointer file,
+so the `CLAUDE.md` marker block stays; `sbx kit add` works on v3 sandboxes but needs a terminal.
+Also measured (E12-E15): `~/.sbxenv.yaml` merges with a project file including a `lifecycle.initialize`
+host command that could start the daemon (asks on every run unless `env.rememberHostCommands=true`;
+epic D9 - the user decided against autostart); a kit declaring both agent-context versions breaks `sbx env run` on an existing
+sandbox, so the kit declares one.
+**Project host sets (epic 0001) are dropped** (user decision): removal is slice 1 of epic 0003; a
+workspace kit with network rules was measured as an alternative and rejected (E16-E19: the plan shows no
+hosts and the agent can extend the kit for its next incarnation).
+The probe kit lived in the session scratchpad only - nothing of it is in the repo.
+**Next**: user answers the open questions of 0003 (6) and 0004 (5); then the 0003 spike.
+
 ## Update 2026-10-26: the omp-sbx launcher was deleted, blocker B went with it
 
 `~/IdeaProjects/omp-sbx` commit `ddc2bf1` removed `omp-sbx`, `omp-sbxenv`,
