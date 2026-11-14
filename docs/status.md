@@ -3,6 +3,16 @@
 Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Release 0.6.0 prepared (2026-11-14, not tagged)
+
+Version is `0.6.0` in `build.gradle.kts` and `McpContext`; `CHANGELOG.md` has the `0.6.0` section
+(the former "Unreleased", its two "Changed" blocks merged, an "Upgrading" part added) and
+`scripts/release-notes.sh 0.6.0` prints it. `./gradlew check` and the launcher tests pass.
+**Still open before the tag**: a third `./gradlew :daemon:e2eTest` on the host (the exec test's
+last change), and one `workflow_dispatch` run of the release workflow - `binaryTestNative` has not
+run with the new `config` / `sbx-json` commands in the native image. Then `git tag v0.6.0` and push
+the tag; the workflow publishes the GitHub release and the Homebrew formula.
+
 ## Epic 0005 drafted: remote approvals over Matrix (2026-11-14, spec only, uncommitted)
 
 `docs/specs/0005-matrix-approvals/epic.md`, status `draft` - not accepted, nothing implemented,

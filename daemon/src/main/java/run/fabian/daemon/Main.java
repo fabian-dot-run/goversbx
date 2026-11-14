@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -37,6 +38,9 @@ public final class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
+        // What the daemon says is read by agents and matched by scripts: always English, whatever the
+        // host's language is (json-schema-validator would answer a German host in German).
+        Locale.setDefault(Locale.ENGLISH);
         // `goversbx-daemon config ...` is the file work behind `goversbx setup/init/run`: no daemon.
         if (args.length > 0 && args[0].equals("config")) {
             System.exit(new ConfigCommand(System.out, System.err).run(List.of(args).subList(1, args.length)));

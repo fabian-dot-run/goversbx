@@ -6,6 +6,12 @@ its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at.
 
 ## Unreleased
 
+## 0.6.0 - 2026-11-14
+
+goversbx now sits on `sbx env`: one kit for every agent, kept once in sbx's user defaults, and
+`goversbx run` in a project directory is the whole setup. Needs sbx 0.51 or newer; tested against
+sbx 0.53.0. There is no 0.5.0.
+
 ### Added
 
 - **`goversbx run` is now the whole setup of a project, on `sbx env`.** `cd` into the project and
@@ -29,8 +35,10 @@ its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at.
   `--refresh` re-applies the kit, for example after a goversbx update. For sandboxes sbx cannot add
   a kit to - created by sbx older than 0.51, or whose original kit no longer exists -
   `goversbx upgrade <name> --exec` does the kit's work by hand (network rule, files, MCP
-  registration); that does not survive a recreate. `goversbx run` says so when it attaches to a
-  sandbox without the kit.
+  registration); that does not survive a recreate, and it brings the skill only where the agent's
+  skills directory is writable (sbx mounts it read-only for Claude Code in a sandbox without mixin
+  kits - the MCP tools work without it). `goversbx run` says so when it attaches to a sandbox
+  without the kit.
 
 ### Changed
 
@@ -51,6 +59,15 @@ its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at.
   instead of as an argument, so it no longer shows up in the host's process list, and passes
   `--no-input` on every sbx call so a prompt (for example Docker sign-in) fails with a message
   instead of hanging an approval.
+- A request for a host that was already approved for the sandbox is no longer approved automatically
+  (`decidedBy: goversbx`): it is an ordinary pending request a human decides again.
+- A request in the admin API's JSON has exactly one `host` again; `hosts`, `origin`, `source`,
+  `profiles` and `hostResults` are gone.
+
+### Fixed
+
+- The daemon answers in English whatever the host's language is. On a German macOS the MCP tool's
+  argument errors came back in German ("erforderliche Eigenschaft 'reason' nicht gefunden").
 
 ### Removed
 
@@ -61,12 +78,17 @@ its notes (`scripts/release-notes.sh`), and what `brew info goversbx` points at.
   every sandbox may reach use `sbx policy allow network <host>`; everything else is requested per
   host by the agent.
 
-### Changed
+### Upgrading
 
-- A request for a host that was already approved for the sandbox is no longer approved automatically
-  (`decidedBy: goversbx`): it is an ordinary pending request a human decides again.
-- A request in the admin API's JSON has exactly one `host` again; `hosts`, `origin`, `source`,
-  `profiles` and `hostResults` are gone.
+`brew upgrade goversbx` (update sbx to 0.51 or newer first), then restart the daemon
+(`goversbx stop && goversbx start`, or `brew services restart goversbx`). The next `goversbx run` in a project directory asks once for your
+default agent and adds the kit to `~/.sbxenv.yaml`.
+
+Existing sandboxes keep working as sbx sandboxes but no longer have goversbx: the four old kits are
+gone. Run `goversbx upgrade` in the project (or `goversbx upgrade <name>`); where sbx refuses that -
+sandboxes created before sbx 0.51 or with one of the old kits - use `goversbx upgrade <name> --exec`
+or recreate the sandbox with `goversbx run`. Scripts that call `goversbx run <agent> <path>` need
+the new form. `.goversbx/network.yaml` files and `~/.config/goversbx/profiles/` can be deleted.
 
 ## 0.4.0 - 2026-10-24
 
