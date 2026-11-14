@@ -3,15 +3,16 @@
 Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
-## Release 0.6.0 prepared (2026-11-14, not tagged)
+## Release 0.6.0 tagged (2026-11-14)
 
 Version is `0.6.0` in `build.gradle.kts` and `McpContext`; `CHANGELOG.md` has the `0.6.0` section
-(the former "Unreleased", its two "Changed" blocks merged, an "Upgrading" part added) and
-`scripts/release-notes.sh 0.6.0` prints it. `./gradlew check` and the launcher tests pass.
-**Still open before the tag**: a third `./gradlew :daemon:e2eTest` on the host (the exec test's
-last change), and one `workflow_dispatch` run of the release workflow - `binaryTestNative` has not
-run with the new `config` / `sbx-json` commands in the native image. Then `git tag v0.6.0` and push
-the tag; the workflow publishes the GitHub release and the Homebrew formula.
+and `scripts/release-notes.sh 0.6.0` prints it. Before the tag the user ran both on the macOS host
+(sbx 0.53.0) and reported them green: `./gradlew :daemon:binaryTestNative` (first native build with
+the `config` / `sbx-json` commands) and `./gradlew :daemon:e2eTest` (third run, after the exec
+test's last change). An earlier native run had stopped at `nativeCompile` - Gradle could not start
+`bin/native-image` of the GraalVM it had downloaded; what made the next run pass was not recorded.
+Tag `v0.6.0` pushed; the release workflow builds, tests and publishes the GitHub release and the
+Homebrew formula.
 
 ## Epic 0005 drafted: remote approvals over Matrix (2026-11-14, spec only, uncommitted)
 
