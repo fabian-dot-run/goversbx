@@ -2,7 +2,7 @@
 # Builds the native daemon, runs the contract test suite against it, and packs a release tarball
 # for the current platform:
 #
-#   GRAALVM_HOME=/path/to/graalvm VERSION=0.2.0 scripts/package-release.sh
+#   VERSION=0.2.0 scripts/package-release.sh          # GRAALVM_HOME=/path/to/graalvm to pick one
 #
 # -> build/release/goversbx-<version>-<os>-<arch>.tar.gz (+ .sha256), laid out as
 #      goversbx-<version>/bin/goversbx            launcher (scripts/goversbx)
@@ -19,8 +19,9 @@
 set -eu
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-GRAALVM_HOME="${GRAALVM_HOME:?set GRAALVM_HOME to a GraalVM installation}"
-export GRAALVM_HOME
+# GRAALVM_HOME is optional: without it Gradle uses a GraalVM 25 it finds or downloads one
+# (daemon/build.gradle.kts).
+[ -z "${GRAALVM_HOME:-}" ] || export GRAALVM_HOME
 
 if [ -z "${VERSION:-}" ]; then
   VERSION="$(git -C "$REPO_DIR" describe --tags --exact-match 2>/dev/null | sed 's/^v//' || true)"

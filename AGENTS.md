@@ -27,7 +27,7 @@ Homebrew formula's caveats link to it. Bump the version in `build.gradle.kts` an
 ./gradlew :daemon:shadowJar          # build the daemon fat jar
 ./gradlew :sandbox-kit:packageKits   # zip each sbx kit (also: syncKitSkills after editing the skill)
 ./gradlew :daemon:binaryTestJar      # contract suite (src/binaryTest) against the jar - part of check
-./gradlew :daemon:binaryTestNative   # trace -> native binary -> contract suite (GRAALVM_HOME + C toolchain)
+./gradlew :daemon:binaryTestNative   # trace -> native binary -> contract suite (C toolchain; GraalVM found or downloaded)
 ./gradlew :daemon:e2eTest            # e2e suite (src/e2eTest) against a REAL signed-in sbx: real daemon, real sandboxes, real policy changes
 scripts/package-release.sh           # everything above + release tarball for this platform
 scripts/testing/record-client-fixtures.sh   # re-record real Claude Code/pi/opencode MCP traffic
@@ -87,7 +87,10 @@ run it against the stub `scripts/testing/fake-sbx` (usage in its header); the sa
   binary also answered every MCP error with a 500, because Jackson serializing an exception needs
   `Throwable` reflection - found by the suite, not by hand.
 - native-image can't cross-compile: the macOS arm64 binary is built on an Apple Silicon runner
-  (`.github/workflows/release.yml`). A Linux build in a sandbox is still a valid check of the
+  (`.github/workflows/release.yml`). GraalVM itself: `GRAALVM_HOME` wins (the workflow sets it);
+  without it the build asks for a Gradle toolchain (GraalVM 25, native-image capable) - one found
+  on the machine or downloaded into `~/.gradle/jdks` by the foojay resolver plugin in
+  `settings.gradle.kts`. A Linux build in a sandbox is still a valid check of the
   metadata. `--no-fallback` is gone on purpose (deprecated no-op in GraalVM 25).
 
 ## Bounded contexts and hexagonal layering (`daemon` module)

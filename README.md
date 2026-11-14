@@ -74,7 +74,7 @@ can't cross-compile), smoke-tests it, attaches the tarball to a GitHub release w
 changelog section (`scripts/release-notes.sh`), and updates `Formula/goversbx.rb` in the tap repo
 (rendered from `packaging/homebrew/goversbx.rb.template`; its caveats link to the release notes;
 setup notes at the top of the workflow). Locally, on any platform:
-`GRAALVM_HOME=... scripts/package-release.sh`.
+`scripts/package-release.sh` (uses the GraalVM in `GRAALVM_HOME`, else one Gradle finds or downloads).
 
 ### Testing the native binary
 
@@ -88,7 +88,7 @@ Claude Code, pi and opencode (`client-fixtures/`, re-record with
 
 ```bash
 ./gradlew :daemon:binaryTestJar        # against the jar (also part of ./gradlew check)
-./gradlew :daemon:binaryTestNative     # against the native binary (GRAALVM_HOME + C toolchain)
+./gradlew :daemon:binaryTestNative     # against the native binary (C toolchain; GraalVM is found or downloaded)
 ```
 
 native-image needs reflection/resource metadata for everything the daemon touches reflectively.

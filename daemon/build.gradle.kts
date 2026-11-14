@@ -30,7 +30,8 @@ tasks.shadowJar {
 }
 
 // `./gradlew :daemon:nativeCompile` -> build/native/nativeCompile/goversbx-daemon, a standalone
-// binary with no JVM dependency. Needs GraalVM (GRAALVM_HOME) and a C toolchain. native-image can't
+// binary with no JVM dependency. Needs a C toolchain; GraalVM is taken from GRAALVM_HOME, found on
+// the machine or downloaded (see graalvmJava below). native-image can't
 // cross-compile: the macOS binary is built on a macOS runner (.github/workflows/release.yml).
 //
 // Black-box contract tests against a daemon *process* (src/binaryTest): no access to daemon classes,
@@ -78,8 +79,17 @@ fun registerBinaryTest(name: String, description: String, command: () -> List<St
         configure()
     }
 
-fun graalvmHome(): String = providers.environmentVariable("GRAALVM_HOME").orNull
-    ?: throw GradleException("set GRAALVM_HOME to a GraalVM installation")
+// Which GraalVM: GRAALVM_HOME if it is set (the release workflow sets it). Otherwise a Gradle
+// toolchain: a GraalVM 25 already on this machine (sdkman, ~/.gradle/jdks, ...) or, if there is
+// none, one Gradle downloads into ~/.gradle/jdks (foojay resolver, settings.gradle.kts).
+val graalvmHomeEnv = providers.environmentVariable("GRAALVM_HOME")
+val graalvmLauncher = javaToolchains.launcherFor {
+    languageVersion.set(JavaLanguageVersion.of(25))
+    vendor.set(JvmVendorSpec.GRAAL_VM)
+    nativeImageCapable.set(true)
+}
+fun graalvmJava(): String = graalvmHomeEnv.orNull?.let { "$it/bin/java" }
+    ?: graalvmLauncher.get().executablePath.asFile.absolutePath
 
 val binaryTestJar = registerBinaryTest("binaryTestJar", "Contract tests against the daemon fat jar.",
     { listOf("${System.getProperty("java.home")}/bin/java", "-jar", fatJar.get().asFile.absolutePath) }) {
@@ -88,21 +98,21 @@ val binaryTestJar = registerBinaryTest("binaryTestJar", "Contract tests against 
 }
 
 val nativeMetadata = registerBinaryTest("nativeMetadata",
-    "Traces the contract tests against the jar with GraalVM's agent into build/native-metadata (needs GRAALVM_HOME).",
+    "Traces the contract tests against the jar with GraalVM's agent into build/native-metadata (GraalVM: see graalvmJava).",
     {
-        listOf("${graalvmHome()}/bin/java",
+        listOf(graalvmJava(),
             "-agentlib:native-image-agent=config-merge-dir=${agentMetadataDir.get().asFile.absolutePath}",
             "-jar", fatJar.get().asFile.absolutePath)
     }) {
     dependsOn(tasks.shadowJar)
     inputs.file(fatJar)
-    inputs.property("graalvmHome", providers.environmentVariable("GRAALVM_HOME").orElse(""))
+    inputs.property("graalvmHome", graalvmHomeEnv.orElse(""))
     outputs.dir(agentMetadataDir)
     // Each test class starts its own daemon; config-merge-dir merges all of their traces.
     doFirst { delete(agentMetadataDir) }
 }
 
-registerBinaryTest("binaryTestNative", "Contract tests against the native binary (needs GRAALVM_HOME).",
+registerBinaryTest("binaryTestNative", "Contract tests against the native binary (GraalVM is found or downloaded).",
     { listOf(nativeBinary.get().asFile.absolutePath) }) {
     dependsOn("nativeCompile")
     inputs.file(nativeBinary)
@@ -168,7 +178,8 @@ tasks.register<Test>("e2eTest") {
 }
 
 graalvmNative {
-    toolchainDetection.set(false)
+    // With GRAALVM_HOME the plugin takes native-image from there; without it, from the toolchain.
+    toolchainDetection.set(!graalvmHomeEnv.isPresent)
     metadataRepository {
         enabled.set(true)
     }
@@ -176,6 +187,7 @@ graalvmNative {
         named("main") {
             imageName.set("goversbx-daemon")
             mainClass.set("run.fabian.daemon.Main")
+            if (!graalvmHomeEnv.isPresent) javaLauncher.set(graalvmLauncher)
             buildArgs.addAll(
                 "-H:+ReportExceptionStackTraces",
                 "--features=run.fabian.daemon.nativeimage.McpSchemaReflectionFeature",
