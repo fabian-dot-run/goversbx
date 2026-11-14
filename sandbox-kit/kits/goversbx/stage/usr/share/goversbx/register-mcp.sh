@@ -65,20 +65,10 @@ JS_RUNTIME=""
 if has node; then JS_RUNTIME=node; elif has bun; then JS_RUNTIME=bun; fi
 
 # --- Claude Code -----------------------------------------------------------------------------
-register_claude() {
-  # `claude mcp add` exits 1 when the entry already exists.
-  claude mcp add goversbx-network "$URL" --transport http --scope user \
-    --header "X-Goversbx-Sandbox-Name: $PLACEHOLDER" >/dev/null 2>&1 || true
-  link_skill "$HOME/.claude/skills"
-  # Always-loaded rule in Claude's user memory. Needed because the sandbox's own CLAUDE.md says
-  # "Approval required -> ask the user to run sbx policy approval", while a kit's agent context is
-  # only a pointer under "## Kits" (also with agent-context@2, sbx 0.51.0) and a skill only loads
-  # when Claude picks it - observed on a real host: Claude followed the sbx text until told "use
-  # goversbx". The block is wrapped in markers and written once per content, so a user's own
-  # CLAUDE.md content is kept and a rerun changes nothing.
-  f="$HOME/.claude/CLAUDE.md"
-  mkdir -p "$HOME/.claude" && touch "$f" || return 1
-  block="$(cat <<'GOVERSBX'
+# The rule for Claude's user memory. Its own function, not a here-document inside $(...): bash 3.2
+# (the `sh` of macOS, where the launcher tests run this script) cannot parse an apostrophe in one.
+claude_rule() {
+  cat <<'GOVERSBX'
 <!-- goversbx:start -->
 ## Blocked network access in this sandbox: use goversbx
 
@@ -93,10 +83,29 @@ that guidance only if the tool is unavailable, or for "Blocked by org policy" / 
 local rule", which goversbx cannot lift.
 <!-- goversbx:end -->
 GOVERSBX
-)"
+}
+
+register_claude() {
+  # `claude mcp add` exits 1 when the entry already exists.
+  claude mcp add goversbx-network "$URL" --transport http --scope user \
+    --header "X-Goversbx-Sandbox-Name: $PLACEHOLDER" >/dev/null 2>&1 || true
+  link_skill "$HOME/.claude/skills"
+  # Always-loaded rule in Claude's user memory. Needed because the sandbox's own CLAUDE.md says
+  # "Approval required -> ask the user to run sbx policy approval", while a kit's agent context is
+  # only a pointer under "## Kits" (also with agent-context@2, sbx 0.51.0) and a skill only loads
+  # when Claude picks it - observed on a real host: Claude followed the sbx text until told "use
+  # goversbx". The block is wrapped in markers and written once per content, so a user's own
+  # CLAUDE.md content is kept and a rerun changes nothing.
+  f="$HOME/.claude/CLAUDE.md"
+  mkdir -p "$HOME/.claude" && touch "$f" || return 1
+  block="$(claude_rule)"
   current="$(sed -n '/<!-- goversbx:start -->/,/<!-- goversbx:end -->/p' "$f")"
   if [ "$current" != "$block" ]; then
-    sed -i '/<!-- goversbx:start -->/,/<!-- goversbx:end -->/d' "$f" && printf '%s\n' "$block" >> "$f"
+    # No `sed -i`: GNU and BSD sed disagree about it. `cat >` keeps the file's owner and mode.
+    tmp="$(mktemp)" || return 1
+    sed '/<!-- goversbx:start -->/,/<!-- goversbx:end -->/d' "$f" > "$tmp" \
+      && printf '%s\n' "$block" >> "$tmp" && cat "$tmp" > "$f"
+    rc=$?; rm -f "$tmp"; return $rc
   fi
 }
 

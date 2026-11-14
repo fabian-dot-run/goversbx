@@ -14,6 +14,13 @@ test's last change). An earlier native run had stopped at `nativeCompile` - Grad
 Tag `v0.6.0` pushed; the release workflow builds, tests and publishes the GitHub release and the
 Homebrew formula.
 
+**First workflow run failed, nothing was published** (run 43577129372): launcher test S10 on the
+macOS runner, `register-mcp.sh: line 128: syntax error near unexpected token '('`. macOS's `sh` is
+bash 3.2, which cannot parse an apostrophe in a here-document inside `$(...)`; `check` had only run
+on Linux. The rule text is now its own function, and the `sed -i` next to it (GNU/BSD differ) is a
+temp file. Checked with bash 3.2 in a container: the old script fails with that message, the new one
+runs. The tag was moved to the fix; **the launcher tests have still not run on macOS outside CI**.
+
 ## Epic 0005 drafted: remote approvals over Matrix (2026-11-14, spec only, uncommitted)
 
 `docs/specs/0005-matrix-approvals/epic.md`, status `draft` - not accepted, nothing implemented,
