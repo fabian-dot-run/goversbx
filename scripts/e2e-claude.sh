@@ -63,6 +63,9 @@ RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
 ADMIN="http://127.0.0.1:$ADMIN_PORT"
+# The admin API is token-gated (threat-model F3). The daemon of this run gets a token of its own,
+# its own state dir (so the real ~/.local/state/goversbx is not touched) and never opens a browser.
+ADMIN_TOKEN="e2e-admin-token-$$"
 DAEMON_URL_FROM_SANDBOX="http://$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT"
 
 SANDBOX_B="$SANDBOX_NAME-b"   # second throwaway sandbox, only to check identities stay per sandbox
@@ -123,7 +126,7 @@ sandbox_status_of() {
 }
 
 pending_request_json() { # $1 = host
-  curl -sS "$ADMIN/api/requests?status=pending" \
+  curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$ADMIN/api/requests?status=pending" \
     | jq -c --arg h "$1" '[.[] | select(.host == $h)] | first // empty'
 }
 
@@ -138,7 +141,7 @@ wait_for_pending() { # $1 = host, $2 = seconds; prints the request JSON
 }
 
 approve() { # $1 = request id; prints the decided request JSON
-  curl -sS -X POST "$ADMIN/api/requests/$1/approve" \
+  curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" -X POST "$ADMIN/api/requests/$1/approve" \
     -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-claude.sh"}'
 }
 
@@ -188,6 +191,9 @@ GOVERSBX_IDENTITY_TARGET_HOST="$IDENTITY_TARGET_HOST" \
 GOVERSBX_IDENTITY_SANDBOX_PATTERN="$SANDBOX_NAME(-b)?" \
 GOVERSBX_SANDBOX_API_PORT="$SANDBOX_API_PORT" \
 GOVERSBX_ADMIN_PORT="$ADMIN_PORT" \
+GOVERSBX_ADMIN_TOKEN="$ADMIN_TOKEN" \
+GOVERSBX_STATE_DIR="$RUN_DIR/state" \
+GOVERSBX_AUTO_OPEN_DASHBOARD=false \
   java -jar "$REPO_DIR/daemon/build/libs/goversbx-daemon.jar" >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 for _ in $(seq 1 30); do
@@ -338,7 +344,7 @@ case " $CREATED_SANDBOXES " in
       else
         fail "request from $SANDBOX_B arrived as '$name' - sandbox-scoped secrets with the same placeholder collide"
       fi
-      curl -sS -o /dev/null -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
+      curl -sS -o /dev/null -H "Authorization: Bearer $ADMIN_TOKEN" -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
         -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-claude.sh"}'
       info "denied the check request (no sbx policy change)"
     else

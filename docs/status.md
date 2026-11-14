@@ -3,6 +3,65 @@
 Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
 and rationale (dated revision sections); `AGENTS.md` has the conventions.
 
+## Epic 0005 drafted: remote approvals over Matrix (2026-11-14, spec only, uncommitted)
+
+`docs/specs/0005-matrix-approvals/epic.md`, status `draft` - not accepted, nothing implemented,
+nothing spiked. Requests as cards in one end-to-end encrypted Matrix room, decided from the phone;
+a new `remoteapproval` context behind an `ApprovalChannel` port, and a published
+`NetworkAccessDecisionApi` so that context can approve/deny. Two things are undecided and the spike
+(slice 0) is there to settle them: **reactions are not encrypted in Matrix, also in encrypted
+rooms, so a homeserver can forge an approval by reaction** (the draft proposes an encrypted reply
+for approve, reaction only for deny or on a self-run homeserver), and **where the E2EE runs**
+(Trixnity inside the native image vs. a Rust helper process on matrix-rust-sdk). Six open
+questions for the user at the end of the epic. Web research only; no fact in it was measured.
+
+## Spike recorded: the goversbx endpoint through sbx's MCP gateway (2026-11-14)
+
+`docs/specs/0005-mcp-via-sbx-gateway/epic.md` (status: spike, not started). The kit is generic except
+for the per-agent MCP registration, which exists only because sbx's gateway loses the sandbox's
+identity. Idea to test: one gateway registration per sandbox with the token as a host-side header
+secret. First question, and the one that can end it: can a sandbox in dynamic mode attach another
+sandbox's registration?
+
+## Bash e2e scripts: admin token, node for pi, keyless config checks (2026-11-14)
+
+First real run of `scripts/e2e-omp.sh` with the v3 kit on the host (sbx 0.53.0): the kit applied,
+bun + omp installed, the sandbox reached the daemon, the raw placeholder triggered the registration
+- and then step 4 failed with `jq: parse error` on every poll. Cause: **all four `scripts/e2e-*.sh`
+called the admin API without the token** (the API is token-gated since the F3 fix; the scripts were
+last run for real before that). Fixed in all four: the run's daemon gets `GOVERSBX_ADMIN_TOKEN`, its
+own `GOVERSBX_STATE_DIR` under the run dir and `GOVERSBX_AUTO_OPEN_DASHBOARD=false`, and every admin
+call sends the bearer token. **`e2e-omp.sh` then passed on the host (2026-11-14, sbx 0.53.0)**:
+kit applied to a `shell` sandbox, bun + omp installed, daemon reachable, raw placeholder ->
+registration -> pending under the real name -> approval -> `sbx policy allow` -> host reachable,
+and identity isolation between the two sandboxes. That run did **not** look at omp's own
+registration: the `mcp.json` and skill checks sat in step 5, which is skipped without
+`ANTHROPIC_API_KEY`. They are step 4c now and run always (not yet rerun). Real `omp -p` (step 5)
+has still never run with the v3 kit.
+
+**`e2e-pi.sh` failed on the host at "node not found"**: the script assumed the shell image ships
+node, and the `shell` workload is a published Debian kit without it since sbx 0.51. The script now
+installs the current Node 22 from nodejs.org into `~/.local` when node is missing (allows
+`nodejs.org:443` per sandbox) and has the same keyless step 4c as the omp script
+(`~/.pi/agent/mcp.json`, skill in `~/.agents/skills`). **It then passed on the host (2026-11-14,
+sbx 0.53.0)**, including 4c: Node 22.23.5 and pi installed in both sandboxes, the whole approval
+chain, identity isolation, and **the kit's registration for pi verified** (`mcp.json` with the
+placeholder header, skill linked). So pi with the v3 kit is confirmed up to the agent itself;
+`pi --print` (step 5) needs `ANTHROPIC_API_KEY` and did not run.
+
+**`e2e-opencode.sh` passed on the host too (2026-11-14, sbx 0.53.0)**, with the built-in `opencode`
+workload: the kit composed with it, approval chain and identity isolation as above. Like the first
+omp run it did not look at the agent's config (those checks were in the skipped step 5); the script
+has a keyless step 4c now (`~/.config/opencode/opencode.json`, skill), not yet rerun. Worth watching
+there: the opencode workload kit merges its own MCP gateway entry into the same file at startup.
+
+**`e2e-omp.sh` rerun with step 4c passed (2026-11-14)**: `~/.omp/agent/mcp.json` has
+`goversbx-network` with the placeholder header and the skill is in `~/.omp/agent/skills`. So pi and
+omp are both confirmed with the v3 kit up to the agent itself.
+
+Still open for the bash scripts: a rerun of `e2e-opencode.sh` for its new step 4c, `e2e-claude.sh`
+on the host, and step 5 (a real agent) in all of them.
+
 ## Slice 4 implemented up to `check` (2026-11-13, uncommitted, e2e and native not run)
 
 `goversbx upgrade [NAME] [--refresh] [--exec]` (spec `0003-sbx-env-native/slice-4.md`, accepted the

@@ -66,6 +66,9 @@ RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
 ADMIN="http://127.0.0.1:$ADMIN_PORT"
+# The admin API is token-gated (threat-model F3). The daemon of this run gets a token of its own,
+# its own state dir (so the real ~/.local/state/goversbx is not touched) and never opens a browser.
+ADMIN_TOKEN="e2e-admin-token-$$"
 DAEMON_URL_FROM_SANDBOX="http://$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT"
 
 SANDBOX_B="$SANDBOX_NAME-b"   # second throwaway sandbox, only to check identities stay per sandbox
@@ -122,7 +125,7 @@ sandbox_status_of() {
 }
 
 pending_request_json() { # $1 = host
-  curl -sS "$ADMIN/api/requests?status=pending" \
+  curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$ADMIN/api/requests?status=pending" \
     | jq -c --arg h "$1" '[.[] | select(.host == $h)] | first // empty'
 }
 
@@ -137,7 +140,7 @@ wait_for_pending() { # $1 = host, $2 = seconds; prints the request JSON
 }
 
 approve() { # $1 = request id; prints the decided request JSON
-  curl -sS -X POST "$ADMIN/api/requests/$1/approve" \
+  curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" -X POST "$ADMIN/api/requests/$1/approve" \
     -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-opencode.sh"}'
 }
 
@@ -185,6 +188,9 @@ GOVERSBX_IDENTITY_TARGET_HOST="$IDENTITY_TARGET_HOST" \
 GOVERSBX_IDENTITY_SANDBOX_PATTERN="$SANDBOX_NAME(-b)?" \
 GOVERSBX_SANDBOX_API_PORT="$SANDBOX_API_PORT" \
 GOVERSBX_ADMIN_PORT="$ADMIN_PORT" \
+GOVERSBX_ADMIN_TOKEN="$ADMIN_TOKEN" \
+GOVERSBX_STATE_DIR="$RUN_DIR/state" \
+GOVERSBX_AUTO_OPEN_DASHBOARD=false \
   java -jar "$REPO_DIR/daemon/build/libs/goversbx-daemon.jar" >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 for _ in $(seq 1 30); do
@@ -329,7 +335,7 @@ case " $CREATED_SANDBOXES " in
       else
         fail "request from $SANDBOX_B arrived as '$name' - sandbox-scoped secrets with the same placeholder collide"
       fi
-      curl -sS -o /dev/null -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
+      curl -sS -o /dev/null -H "Authorization: Bearer $ADMIN_TOKEN" -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
         -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-opencode.sh"}'
       info "denied the check request (no sbx policy change)"
     else
@@ -340,6 +346,29 @@ case " $CREATED_SANDBOXES " in
 esac
 
 # ---------------------------------------------------------------------------------------------
+# What the kit's register-mcp.sh did for opencode - files only, so this needs no API key. The
+# opencode workload kit merges its own entry (the sbx MCP gateway) into the same opencode.json at
+# startup, after our install hook: both entries have to be there.
+if [ "${SKIP_OPENCODE:-0}" != 1 ]; then
+  step "4c. What the kit set up for opencode"
+  out="$("$SBX" exec "$SANDBOX_NAME" sh -c 'cat /home/agent/.config/opencode/opencode.json 2>&1')"
+  if echo "$out" | grep -q "goversbx-network" && echo "$out" | grep -q "$PLACEHOLDER"; then
+    pass "kit registered the MCP endpoint (~/.config/opencode/opencode.json has goversbx-network with the placeholder header)"
+  else
+    fail "kit did not register goversbx-network in ~/.config/opencode/opencode.json: $out"
+  fi
+  if echo "$out" | jq -e '.mcp | keys | length > 1' >/dev/null 2>&1; then
+    info "opencode.json mcp entries: $(echo "$out" | jq -r '.mcp | keys | join(", ")')"
+  else
+    info "opencode.json has no other mcp entry than ours (the workload's gateway entry is missing or not merged yet)"
+  fi
+  if "$SBX" exec "$SANDBOX_NAME" test -f /home/agent/.agents/skills/goversbx-network-access/SKILL.md; then
+    pass "kit installed the skill at ~/.agents/skills/goversbx-network-access/SKILL.md"
+  else
+    fail "skill missing at ~/.agents/skills/goversbx-network-access/SKILL.md"
+  fi
+fi
+
 if [ "${SKIP_OPENCODE:-0}" = 1 ]; then
   step "5. Real opencode (opencode run --auto) - skipped (SKIP_OPENCODE=1)"
 elif [ -z "${ANTHROPIC_API_KEY:-}" ]; then

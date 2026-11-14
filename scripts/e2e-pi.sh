@@ -69,6 +69,9 @@ RUN_DIR="$HOME/.cache/goversbx-e2e/$SANDBOX_NAME"
 WORKSPACE="$RUN_DIR/workspace"
 DAEMON_LOG="$RUN_DIR/daemon.log"
 ADMIN="http://127.0.0.1:$ADMIN_PORT"
+# The admin API is token-gated (threat-model F3). The daemon of this run gets a token of its own,
+# its own state dir (so the real ~/.local/state/goversbx is not touched) and never opens a browser.
+ADMIN_TOKEN="e2e-admin-token-$$"
 DAEMON_URL_FROM_SANDBOX="http://$SANDBOX_DAEMON_HOST:$SANDBOX_API_PORT"
 
 SANDBOX_B="$SANDBOX_NAME-b"   # second throwaway sandbox, only to check identities stay per sandbox
@@ -125,7 +128,7 @@ sandbox_status_of() {
 }
 
 pending_request_json() { # $1 = host
-  curl -sS "$ADMIN/api/requests?status=pending" \
+  curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$ADMIN/api/requests?status=pending" \
     | jq -c --arg h "$1" '[.[] | select(.host == $h)] | first // empty'
 }
 
@@ -140,7 +143,7 @@ wait_for_pending() { # $1 = host, $2 = seconds; prints the request JSON
 }
 
 approve() { # $1 = request id; prints the decided request JSON
-  curl -sS -X POST "$ADMIN/api/requests/$1/approve" \
+  curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" -X POST "$ADMIN/api/requests/$1/approve" \
     -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-pi.sh"}'
 }
 
@@ -188,6 +191,9 @@ GOVERSBX_IDENTITY_TARGET_HOST="$IDENTITY_TARGET_HOST" \
 GOVERSBX_IDENTITY_SANDBOX_PATTERN="$SANDBOX_NAME(-b)?" \
 GOVERSBX_SANDBOX_API_PORT="$SANDBOX_API_PORT" \
 GOVERSBX_ADMIN_PORT="$ADMIN_PORT" \
+GOVERSBX_ADMIN_TOKEN="$ADMIN_TOKEN" \
+GOVERSBX_STATE_DIR="$RUN_DIR/state" \
+GOVERSBX_AUTO_OPEN_DASHBOARD=false \
   java -jar "$REPO_DIR/daemon/build/libs/goversbx-daemon.jar" >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 for _ in $(seq 1 30); do
@@ -222,20 +228,33 @@ if out="$(in_sandbox 'echo ok' 2>&1)" && [ "$(echo "$out" | tail -1)" = ok ]; th
 else
   echo "$out"; die "sbx exec $SANDBOX_NAME failed (sandbox not running? try: $SBX run --name $SANDBOX_NAME)"
 fi
-# pi's MCP config merge (the kit's startup script) needs `node`; the shell image is assumed to have
-# it (docker/sandbox-templates shell). Installing pi itself is this script's job, not the kit's.
-if out="$(in_sandbox 'command -v node' 2>&1)" && [ -n "$out" ]; then
-  pass "node present in the sandbox ($out)"
-else
-  die "node not found in the sandbox - the pi kit's MCP merge and pi itself both need it"
-fi
+# pi is a Node app and the kit's MCP merge needs a JS runtime too. The shell workload is a published
+# Debian kit since sbx 0.51 and no longer ships node, so this script installs the current Node 22
+# from nodejs.org into ~/.local when it is missing (~/.local/bin is on the kit script's PATH and on
+# a login shell's). Installing node and pi is this script's job, not the kit's.
+INSTALL_NODE='set -e
+export PATH="$HOME/.local/bin:$PATH"
+if command -v node >/dev/null 2>&1; then echo "node $(node --version) already there"; exit 0; fi
+case "$(uname -m)" in aarch64|arm64) arch=arm64 ;; x86_64|amd64) arch=x64 ;; *) echo "unsupported architecture $(uname -m)"; exit 1 ;; esac
+base=https://nodejs.org/dist/latest-v22.x
+file="$(curl -fsSL "$base/SHASUMS256.txt" | grep -o "node-v[0-9.]*-linux-$arch\.tar\.gz" | head -n 1)"
+[ -n "$file" ] || { echo "no linux-$arch tarball listed at $base"; exit 1; }
+mkdir -p "$HOME/.local"
+curl -fsSL "$base/$file" | tar -xz -C "$HOME/.local" --strip-components=1
+echo "node $("$HOME/.local/bin/node" --version) installed from $file"'
 # The pi kit's permissions.network.allow only covers the daemon host, not general internet access -
 # whatever the sandbox's default sbx policy doesn't already allow (e.g. a fresh deny-all/balanced
 # host) has to be granted explicitly here, same fallback pattern as step 3's daemon-reachability
 # check (docs/plan.md: a prior real run needed registry.npmjs.org approved for this to work).
 for sb in $CREATED_SANDBOXES; do
   "$SBX" policy allow network "registry.npmjs.org:443" --sandbox "$sb" >/dev/null 2>&1
-  if out="$("$SBX" exec "$sb" sh -c "npm install -g $PI_PACKAGE" 2>&1)"; then
+  "$SBX" policy allow network "nodejs.org:443" --sandbox "$sb" >/dev/null 2>&1
+  if out="$("$SBX" exec "$sb" sh -c "$INSTALL_NODE" 2>&1)"; then
+    pass "$(echo "$out" | tail -n 1) in $sb"
+  else
+    echo "$out"; die "installing node failed in $sb - nodejs.org is allowed for $sb; if the download redirects elsewhere: sbx policy allow network <host>:443 --sandbox $sb, then re-run"
+  fi
+  if out="$("$SBX" exec "$sb" sh -c "export PATH=\"\$HOME/.local/bin:\$PATH\" && npm install -g $PI_PACKAGE" 2>&1)"; then
     pass "pi ($PI_PACKAGE) installed in $sb"
     # The kit registers the endpoint for the agents it finds at create and on every start; this
     # agent was installed after create, so run the kit's hook once now instead of restarting.
@@ -355,7 +374,7 @@ case " $CREATED_SANDBOXES " in
       else
         fail "request from $SANDBOX_B arrived as '$name' - sandbox-scoped secrets with the same placeholder collide"
       fi
-      curl -sS -o /dev/null -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
+      curl -sS -o /dev/null -H "Authorization: Bearer $ADMIN_TOKEN" -X POST "$ADMIN/api/requests/$(echo "$req" | jq -r '.id')/deny" \
         -H 'Content-Type: application/json' -d '{"decidedBy":"e2e-pi.sh"}'
       info "denied the check request (no sbx policy change)"
     else
@@ -364,6 +383,23 @@ case " $CREATED_SANDBOXES " in
     ;;
   *) info "skipped - second sandbox was not created" ;;
 esac
+
+# ---------------------------------------------------------------------------------------------
+# What the kit's register-mcp.sh did for pi - files only, so this needs no API key.
+if [ "${SKIP_PI:-0}" != 1 ]; then
+  step "4c. What the kit set up for pi"
+  out="$("$SBX" exec "$SANDBOX_NAME" sh -c 'cat /home/agent/.pi/agent/mcp.json 2>&1')"
+  if echo "$out" | grep -q "goversbx-network" && echo "$out" | grep -q "$PLACEHOLDER"; then
+    pass "kit registered the MCP endpoint (~/.pi/agent/mcp.json has goversbx-network with the placeholder header)"
+  else
+    fail "kit did not register goversbx-network in ~/.pi/agent/mcp.json: $out"
+  fi
+  if "$SBX" exec "$SANDBOX_NAME" test -f /home/agent/.agents/skills/goversbx-network-access/SKILL.md; then
+    pass "kit installed the skill at ~/.agents/skills/goversbx-network-access/SKILL.md"
+  else
+    fail "skill missing at ~/.agents/skills/goversbx-network-access/SKILL.md"
+  fi
+fi
 
 # ---------------------------------------------------------------------------------------------
 if [ "${SKIP_PI:-0}" = 1 ]; then
