@@ -65,7 +65,7 @@ class LauncherSequenceTest {
     void goversbxRunInAnEmptyDirectoryCreatesARegisteredSandboxWithTheKit() throws Exception {
         String name = env.config.sandboxPrefix + "-d";
         Path ws = Files.createDirectories(env.config.runDir.resolve("project-d"));
-        try (UserDefaults ignored = UserDefaults.saved()) {
+        try (UserDefaults ignored = UserDefaults.setAside(env.config.runDir)) {
             Launch setup = launch(ws, "setup", "--agent", "claude");
             assertEquals(0, setup.exit, setup.out);
             String defaults = Files.readString(UserDefaults.FILE);
@@ -114,7 +114,7 @@ class LauncherSequenceTest {
         Path ws = Files.createDirectories(env.config.runDir.resolve("project-e"));
         String projectFile = "schemaVersion: \"1\"\nname: " + name + "\nworkspace: .\nenv:\n  GOVERSBX_E2E_MARK: from-project\n";
         Files.writeString(ws.resolve("sbxenv.yaml"), projectFile);
-        try (UserDefaults ignored = UserDefaults.saved()) {
+        try (UserDefaults ignored = UserDefaults.setAside(env.config.runDir)) {
             assertEquals(0, launch(ws, "setup", "--agent", "claude").exit);
 
             Launch run = launch(ws, "run", "--force");
@@ -166,8 +166,11 @@ class LauncherSequenceTest {
 
     /**
      * sbx reads the user defaults from the real {@code ~/.sbxenv.yaml} - there is no way to point it
-     * elsewhere - so these tests write the real file. Whatever was there (and goversbx's backup of
-     * it) is put back when the test is done.
+     * elsewhere - so these tests use the real file. What the machine has there (another default
+     * agent, other kits - a workload kit of its own would not even compose with `claude`) must not
+     * decide the outcome: the file is set aside for the test, `goversbx setup` creates a fresh one,
+     * and the original (and goversbx's backup of it) is put back afterwards. A copy is kept in the
+     * run directory in case the JVM dies in between.
      */
     private static final class UserDefaults implements AutoCloseable {
         static final Path FILE = Path.of(System.getenv("HOME"), ".sbxenv.yaml");
@@ -180,9 +183,16 @@ class LauncherSequenceTest {
             this.backup = backup;
         }
 
-        static UserDefaults saved() throws java.io.IOException {
-            return new UserDefaults(Files.exists(FILE) ? Files.readAllBytes(FILE) : null,
+        static UserDefaults setAside(Path runDir) throws java.io.IOException {
+            UserDefaults saved = new UserDefaults(Files.exists(FILE) ? Files.readAllBytes(FILE) : null,
                     Files.exists(BACKUP) ? Files.readAllBytes(BACKUP) : null);
+            if (saved.file != null) {
+                Path copy = runDir.resolve("sbxenv.yaml.set-aside");
+                Files.write(copy, saved.file);
+                System.out.println("    ~/.sbxenv.yaml set aside for this test (copy: " + copy + ")");
+                Files.delete(FILE);
+            }
+            return saved;
         }
 
         @Override

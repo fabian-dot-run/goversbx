@@ -309,12 +309,13 @@ else fail "S8 kit add fails" "rc=$rc out=$out calls=$(calls)"; fi
 out="$(cd "$ws" && FAKE_SBX_EXEC_NOOP=1 "$L" upgrade up3 --exec 2>&1)"; rc=$?
 a="$(line_of "policy allow network localhost:$PORT --sandbox up3")"
 c="$(grep -n "^cp $KIT/stage/usr/share/goversbx up3:/home/agent/.local/share/goversbx\$" "$CALLS" | cut -d: -f1)"
+m="$(line_of "exec -u root up3 chmod -R a+rX /home/agent/.local/share/goversbx")"
 e="$(grep -n "^exec -e GOVERSBX_DAEMON_HOST=host.docker.internal -e GOVERSBX_DAEMON_PORT=$PORT up3 sh /home/agent/.local/share/goversbx/register-mcp.sh\$" "$CALLS" | cut -d: -f1)"
 g="$(line_of "curl sandboxes/up3/register")"
-if [ "$rc" -eq 0 ] && [ -n "$a" ] && [ -n "$c" ] && [ -n "$e" ] && [ -n "$g" ] && [ "$a" -lt "$c" ] && [ "$c" -lt "$e" ] && [ "$e" -lt "$g" ] \
+if [ "$rc" -eq 0 ] && [ -n "$a" ] && [ -n "$c" ] && [ -n "$m" ] && [ -n "$e" ] && [ -n "$g" ] && [ "$a" -lt "$c" ] && [ "$c" -lt "$m" ] && [ "$m" -lt "$e" ] && [ "$e" -lt "$g" ] \
    && [ "$(grep -c '^kit add' "$CALLS")" -eq 0 ] && printf '%s' "$out" | grep -q "gone when the sandbox is recreated"; then
-  pass "S7 upgrade --exec: policy allow, cp, register-mcp.sh, register - no kit add, and it says what it is not"
-else fail "S7 exec fallback" "rc=$rc a=$a c=$c e=$e g=$g out=$out calls=$(calls)"; fi
+  pass "S7 upgrade --exec: policy allow, cp, chmod as root, register-mcp.sh, register - no kit add, and it says what it is not"
+else fail "S7 exec fallback" "rc=$rc a=$a c=$c m=$m e=$e g=$g out=$out calls=$(calls)"; fi
 
 # sbx cannot tell: nothing is done.
 out="$(cd "$ws" && FAKE_SBX_INSPECT_FAIL=1 "$L" upgrade up3 2>&1)"; rc=$?

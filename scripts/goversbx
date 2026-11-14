@@ -380,6 +380,9 @@ upgrade_by_exec() {
   "$SBX" policy allow network "localhost:$SANDBOX_API_PORT" --sandbox "$name" || exit $?
   "$SBX" exec "$name" sh -c "mkdir -p $share && rm -rf $share/goversbx" || exit $?
   "$SBX" cp "$KIT_DIR/stage/usr/share/goversbx" "$name:$share/goversbx" || exit $?
+  # sbx cp keeps the host file's mode and may not make the agent the owner (seen on macOS: a 0600
+  # source file ends up unreadable for the agent). In the kit the dockerfile's --chmod does this.
+  "$SBX" exec -u root "$name" chmod -R a+rX "$share/goversbx" || exit $?
   "$SBX" exec -e "GOVERSBX_DAEMON_HOST=host.docker.internal" -e "GOVERSBX_DAEMON_PORT=$SANDBOX_API_PORT" \
     "$name" sh "$share/goversbx/register-mcp.sh" || exit $?
 }

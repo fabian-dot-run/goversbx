@@ -35,7 +35,13 @@ has() { command -v "$1" >/dev/null 2>&1; }
 link_skill() { # $1 = skills directory
   [ -d "$SKILL_SRC" ] || return 0
   [ -e "$1/$SKILL_NAME" ] && return 0
-  mkdir -p "$1" && ln -s "$SKILL_SRC" "$1/$SKILL_NAME"
+  # Without a mixin kit sbx mounts the host's shared skills store read-only right at the agent's
+  # skills directory (seen with claude on sbx 0.53): nothing can be linked there. The tools'
+  # descriptions carry the agent without the skill.
+  if ! mkdir -p "$1" 2>/dev/null || ! ln -s "$SKILL_SRC" "$1/$SKILL_NAME" 2>/dev/null; then
+    say "skill not linked: $1 is not writable (the MCP tools work without it)"
+  fi
+  return 0
 }
 
 # Merges one entry into a JSON config with whatever JS runtime is there (pi is a Node app, omp a

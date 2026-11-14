@@ -80,7 +80,10 @@ class UpgradeTest {
             assertTrue(x.daemonHealth().contains("\"ok\""), name + " cannot reach the daemon after `upgrade --exec`: " + x.daemonHealth());
             assertTrue(x.readFile("/home/agent/.claude.json").contains(env.config.daemonUrlFromSandbox() + "/mcp"),
                     "goversbx-network is not registered after `upgrade --exec`");
-            assertTrue(x.readFile(SKILL).contains("request_network_access"), "the skill copied by `upgrade --exec` is not linked");
+            // Without a mixin kit sbx mounts the shared skills store read-only at ~/.claude/skills
+            // (sbx 0.53): the skill is linked where that is possible, and said so where it is not.
+            assertTrue(x.fileExists(SKILL) || upgrade.out.contains("skill not linked"),
+                    "the skill is neither linked nor reported as not linkable:\n" + upgrade.out);
             assertPendingUnderOwnName(x, name);
         } finally {
             x.remove();

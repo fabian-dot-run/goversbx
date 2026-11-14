@@ -285,6 +285,11 @@ All five proposals were accepted as written:
 - A `--check` on a missing file reports one finding (`the file does not exist`), exit 2.
 - The e2e tests (S23, S24) write the **real** `~/.sbxenv.yaml` of the machine they run on - sbx
   reads no other - and restore it (and goversbx's backup of it) afterwards.
+- **2026-11-14, first e2e run on the host (sbx 0.53.0):** S25 passed. S23 and S24 failed in the
+  tests' own assumption that the machine's default agent is `claude` (the host has `agent: omp`
+  and the omp-sbx kits in `~/.sbxenv.yaml`); the launcher's part worked on real sbx in both. The
+  tests now set the real file aside and let `setup` create a fresh one - they no longer just
+  "write and restore" it. Not rerun yet.
 - Scenario S9 (symlink) and S2-S4 are pinned in `UserDefaultsEditorTest` / `ConfigCommandTest`
   (`daemon/src/test/.../userdefaults`); S1, S5-S8 also in `binaryTest`'s `ConfigCommandTest`.
 

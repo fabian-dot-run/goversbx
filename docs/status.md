@@ -15,6 +15,44 @@ for approve, reaction only for deny or on a self-run homeserver), and **where th
 (Trixnity inside the native image vs. a Rust helper process on matrix-rust-sdk). Six open
 questions for the user at the end of the epic. Web research only; no fact in it was measured.
 
+## Gradle e2e suite on the host, sbx 0.53.0 (2026-11-14): 32 tests, 28 passed, 3 failed, 1 skipped
+
+First complete run of `./gradlew :daemon:e2eTest` on the macOS host with slices 1-4 (2m30s, images
+cached). **Passed**: `SbxCliContractTest` (incl. the `env plan` name line and the `inspect` JSON
+shape), `ClaudeKitTest` (Claude Code with the v3 kit: `goversbx-network` connected, skill,
+`CLAUDE.md` block), `ApprovalFlowTest`, `DaemonRestartTest`, the pre-registration test, and
+**`UpgradeTest`'s kit-add test** - `goversbx upgrade` on a pseudo-terminal (BSD `script` works),
+`inspect` lists the kit, a file in the home survives, "already has", `--refresh` without a terminal.
+
+The three failures and what was done:
+
+- **`LauncherSequenceTest` (both launcher tests): the tests, not the launcher.** They assumed the
+  default agent is `claude`; the host's `~/.sbxenv.yaml` has `agent: omp` plus the omp-sbx kits, so
+  the sandboxes were omp sandboxes and the Claude paths the tests check did not exist. The launcher
+  itself did everything right on real sbx - `setup` kept the foreign agent and only set the port,
+  `run` wrote the scaffold, planned, created with `--force`, registered without a warning and went
+  to `env run`. The tests now set the machine's `~/.sbxenv.yaml` aside, let `goversbx setup` create
+  a fresh one and restore the original afterwards (copy kept in the run dir). **Rerun on the host:
+  both pass.**
+- **`UpgradeTest` exec fallback: a real bug.** `sh: cannot open
+  .../register-mcp.sh: Permission denied` - `sbx cp` kept the host file's mode (0600 in this working
+  tree) and the agent was not its owner. `upgrade --exec` now runs
+  `sbx exec -u root NAME chmod -R a+rX` on the copied payload before the script. **Rerun: the
+  fallback itself works** - rule added, endpoint registered with Claude Code, daemon reachable,
+  exit 0. The test still failed, on its own extra assertion that the skill is linked: a sandbox
+  created without any mixin kit gets the host's shared skills store mounted **read-only directly at
+  `~/.claude/skills`** (with a kit it is `/run/sbx/skills-shared`), so `ln` fails with "Read-only
+  file system". `register-mcp.sh` now says `skill not linked: <dir> is not writable (the MCP tools
+  work without it)` instead of leaking `ln`'s error, and the test accepts either outcome (S13 never
+  asked for the skill). That last change has not been rerun.
+
+Seen along the way: **goversbx composes with omp-sbx's `omp` workload and `omlx-mixin`** from the
+user defaults ("assembling kit image from 3 kits", our install hook ran) - the open item since epic
+0002. Whether `omlx-provider.ts` is intact in that composition (blocker A) was not checked.
+
+**Second run (2026-11-14, 2m05s): 32 tests, 30 passed, 1 failed (the skill assertion above), 1
+skipped.** **Next**: rerun once more for `UpgradeTest`'s exec test.
+
 ## Spike recorded: the goversbx endpoint through sbx's MCP gateway (2026-11-14)
 
 `docs/specs/0006-mcp-via-sbx-gateway/epic.md` (status: spike, not started). The kit is generic except

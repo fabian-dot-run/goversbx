@@ -76,7 +76,7 @@ case "$cmd" in
     done < "$STATE/sandboxes"; echo ']' ;;
   exec)
     envs=()
-    while [ "$1" = -e ]; do envs+=("$2"); shift 2; done
+    while [ "$1" = -e ] || [ "$1" = -u ]; do [ "$1" = -u ] || envs+=("$2"); shift 2; done
     name="$1"; shift
     # FAKE_SBX_EXEC_NOOP=1: only record the call (the launcher tests must not run a sandbox's
     # commands on the machine).

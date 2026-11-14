@@ -164,6 +164,16 @@ prompt follows.
   kit gone): goversbx upgrade <name> --exec ...` - without a terminal the failure is usually just
   the unanswered prompt, and the line must not suggest the fallback for that.
 - `upgrade` ends with `<name> has goversbx now` after registering.
+- **2026-11-14, from the first e2e run on macOS:** the exec fallback is five sbx calls. After
+  `sbx cp` an `sbx exec -u root NAME chmod -R a+rX <payload>` is needed: `sbx cp` keeps the host
+  file's mode and does not make the agent the owner, so a `0600` `register-mcp.sh` could not be
+  opened. S11 and S12 passed on the host (sbx 0.53.0, BSD `script`); S13 failed on exactly this
+  and passed everything S13 asks for on the rerun; S14 passed.
+- **2026-11-14, second run:** the exec fallback cannot bring the skill to Claude Code in a sandbox
+  without mixin kits - sbx 0.53 mounts the shared skills store read-only at `~/.claude/skills`
+  there. `register-mcp.sh` reports `skill not linked: ...` and goes on; the tools' descriptions
+  carry the agent. So the fallback is: network rule, MCP registration, `CLAUDE.md` block - and the
+  skill only where the agent's skills directory is writable.
 - The e2e test for S11 types `y` through `script` (util-linux `script -qec`, BSD
   `script -q /dev/null`); the BSD form has not run anywhere yet.
 

@@ -173,7 +173,8 @@ sbx asks to approve the kit's network rules and recreates the container; what is
 home stays. `--refresh` re-applies the kit after a goversbx update. sbx refuses `kit add` for
 sandboxes created before 0.51 and for ones whose original kit is gone; for those
 `goversbx upgrade <name> --exec` sets up the same things by hand (network rule, files, MCP
-registration) - it works until the sandbox is recreated, and `goversbx run` in the project then
+registration; the skill only where the agent's skills directory is writable) - it works until the
+sandbox is recreated, and `goversbx run` in the project then
 creates a proper one. To remove goversbx
 from sbx, delete its entry under `kits:` in `~/.sbxenv.yaml` - Homebrew has no uninstall hook that
 could. `goversbx dashboard` opens the admin UI at the configured admin port and refuses if the
