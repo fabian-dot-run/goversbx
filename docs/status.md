@@ -17,7 +17,7 @@ questions for the user at the end of the epic. Web research only; no fact in it 
 
 ## Spike recorded: the goversbx endpoint through sbx's MCP gateway (2026-11-14)
 
-`docs/specs/0005-mcp-via-sbx-gateway/epic.md` (status: spike, not started). The kit is generic except
+`docs/specs/0006-mcp-via-sbx-gateway/epic.md` (status: spike, not started). The kit is generic except
 for the per-agent MCP registration, which exists only because sbx's gateway loses the sandbox's
 identity. Idea to test: one gateway registration per sandbox with the token as a host-side header
 secret. First question, and the one that can end it: can a sandbox in dynamic mode attach another

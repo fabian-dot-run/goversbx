@@ -245,7 +245,7 @@ registering the endpoint in the agent (D1) and the gateway stays out.
 
 A different way to get an unforgeable identity through the gateway - one registration per sandbox
 with the token as a host-side header secret - is recorded as a spike in
-[`../0005-mcp-via-sbx-gateway/epic.md`](../0005-mcp-via-sbx-gateway/epic.md) (2026-11-14, not started).
+[`../0006-mcp-via-sbx-gateway/epic.md`](../0006-mcp-via-sbx-gateway/epic.md) (2026-11-14, not started).
 
 ### D9 - the daemon is not shipped by the kit, and not started from the user defaults
 

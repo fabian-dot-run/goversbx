@@ -1,4 +1,4 @@
-# Epic 0005: the goversbx endpoint through sbx's MCP gateway - spike
+# Epic 0006: the goversbx endpoint through sbx's MCP gateway - spike
 
 Status: spike, not started (recorded 2026-11-14). Nothing here is decided or measured beyond what
 epic 0003 already measured. A spec follows only if the spike's first question comes out well.
