@@ -1,0 +1,4 @@
+schemaVersion: "1"
+workspace: .
+# kits:               # project mixins; goversbx itself comes from ~/.sbxenv.yaml
+#   - docker.io/sbx/playwright:1.61.1
