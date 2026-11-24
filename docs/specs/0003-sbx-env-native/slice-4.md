@@ -1,16 +1,10 @@
 # Slice 4: `goversbx upgrade` - goversbx on sandboxes that already exist
 
-Status: implementing (2026-11-13; the user accepted all six proposals and started the
-implementation the same day) · Epic: [`epic.md`](epic.md) (D5) · Ships with 0.6.0 if that is still
-open when this is done, else 0.6.1
+Status: done (2026-11-14), released in 0.6.0 · Epic: [`epic.md`](epic.md) (D5)
 
-Done: `./gradlew check` is green - `sbx-json` (`unit`, and `contract` against the jar), the
-launcher on `fake-sbx` (`launcher`, S3-S10). On real sbx 0.53.0 in the dev sandbox, by hand with the
-`shell` workload: `goversbx upgrade` without a terminal (refused by sbx, the hint follows), on a
-pseudo-terminal (kit added, daemon started, sandbox registered, daemon reachable from the sandbox on
-the non-default port), again ("already has"), and `--refresh` without a terminal.
-**Not run: the `e2e` scenarios S11-S14, `upgrade --exec` end to end against a real sbx** (the inner
-sbx lost its Docker sign-in before that step; its three parts are M6), and `binaryTestNative`.
+`./gradlew check` is green - `sbx-json` (`unit`, and `contract` against the jar), the launcher on
+`fake-sbx` (`launcher`, S3-S10). On the macOS host (sbx 0.53.0): the `e2e` scenarios S11-S14 green
+(S13 after the two fixes in the implementation notes) and `binaryTestNative` green. Unmeasured: M8.
 
 ## Problem
 
@@ -175,7 +169,8 @@ prompt follows.
   carry the agent. So the fallback is: network rule, MCP registration, `CLAUDE.md` block - and the
   skill only where the agent's skills directory is writable.
 - The e2e test for S11 types `y` through `script` (util-linux `script -qec`, BSD
-  `script -q /dev/null`); the BSD form has not run anywhere yet.
+  `script -q /dev/null`); the BSD form passed on the host.
+- **2026-11-14, third run:** green, S13 included.
 
 ## Open questions
 

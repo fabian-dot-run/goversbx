@@ -1,7 +1,27 @@
 # Implementation status
 
-Snapshot as of 2026-10-24. This is the place to resume from. `docs/plan.md` has the full history
-and rationale (dated revision sections); `AGENTS.md` has the conventions.
+Snapshot as of 2026-11-24, newest section first. This is the place to resume from. `docs/plan.md`
+has the full history and rationale (dated revision sections); `AGENTS.md` has the conventions.
+
+## 0.6.0 published, epic 0003 done (2026-11-24)
+
+The second release run (43584518431, on the bash 3.2 fix) was green, launcher tests on the macOS
+runner included; the GitHub release and the Homebrew formula went out on 2026-11-14. Epic 0003 and
+its slices 2-4 are now `done` (slice 1 already was): what they were waiting for is the third host
+run of `:daemon:e2eTest` (`LauncherSequenceTest` and `UpgradeTest`'s exec test included) and the
+native run, both green before the tag. The blog post `docs/blog/goversbx-de.md` was held back for
+this release and can go out now.
+
+Open, none of it blocking:
+
+- Not verified: `e2e-opencode.sh` step 4c, `e2e-claude.sh` on the host, step 5 (a real agent,
+  needs `ANTHROPIC_API_KEY`) in every bash script; M8 (`kit add` under an attached agent session);
+  whether omp-sbx's `omlx-provider.ts` survives the composition with `omp` + `omlx-mixin` (blocker
+  A - they compose, the file was not checked); the dashboard in a browser since slice 1.
+- Waiting for the user: epic 0004 (5 open questions), epic 0005 (6 open questions, then its
+  spike), spike 0006.
+
+**Next**: the user picks the next epic.
 
 ## Release 0.6.0 tagged (2026-11-14)
 
@@ -69,7 +89,7 @@ user defaults ("assembling kit image from 3 kits", our install hook ran) - the o
 0002. Whether `omlx-provider.ts` is intact in that composition (blocker A) was not checked.
 
 **Second run (2026-11-14, 2m05s): 32 tests, 30 passed, 1 failed (the skill assertion above), 1
-skipped.** **Next**: rerun once more for `UpgradeTest`'s exec test.
+skipped.** The third run, after that change, was green (see the 0.6.0 section).
 
 ## Spike recorded: the goversbx endpoint through sbx's MCP gateway (2026-11-14)
 

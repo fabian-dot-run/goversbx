@@ -1,14 +1,11 @@
 # Slice 3: `goversbx setup`, `init` and `run` on `sbx env`, thin CLI
 
-Status: implementing (2026-11-13; the user answered questions 1-5 and started the implementation
-the same day) · Epic: [`epic.md`](epic.md) (D2, D3, D4, D6) · Ships as: **0.6.0** (with slices 1
-and 2)
+Status: done (2026-11-14), released in **0.6.0** (with slices 1 and 2) · Epic: [`epic.md`](epic.md)
+(D2, D3, D4, D6)
 
-Done: `./gradlew check` is green - the editor and the `config` command (`unit`), the `config`
-subcommand as a process against the jar (`contract`), and the launcher on `fake-sbx` (`launcher`).
-**Not run: the three `e2e` scenarios (S23-S25) and `binaryTestNative` (S10)** - no sandbox could be
-created in time on the day (downlink of a few KB/s) and the dev sandbox has no GraalVM. `done`
-once those have run, here or on the host.
+`./gradlew check` is green - the editor and the `config` command (`unit`), the `config` subcommand
+as a process against the jar (`contract`), and the launcher on `fake-sbx` (`launcher`). On the
+macOS host (sbx 0.53.0): the `e2e` scenarios S23-S25 and `binaryTestNative` (S10) green.
 
 ## Problem
 
@@ -289,12 +286,12 @@ All five proposals were accepted as written:
   tests' own assumption that the machine's default agent is `claude` (the host has `agent: omp`
   and the omp-sbx kits in `~/.sbxenv.yaml`); the launcher's part worked on real sbx in both. The
   tests now set the real file aside and let `setup` create a fresh one - they no longer just
-  "write and restore" it. Not rerun yet.
+  "write and restore" it. Rerun on the host (2026-11-14): both pass.
 - Scenario S9 (symlink) and S2-S4 are pinned in `UserDefaultsEditorTest` / `ConfigCommandTest`
   (`daemon/src/test/.../userdefaults`); S1, S5-S8 also in `binaryTest`'s `ConfigCommandTest`.
 
 ## Open questions
 
 - None for the design. M10 is measured (table above) and changed nothing in the flow.
-  `:daemon:e2eTest` on 0.53.0 (S23-S25) and `binaryTestNative` (S10) are still to be run; a first
-  host run on 2026-11-13 failed in the suite's setup on an image pull timeout, before any test.
+  S23-S25 and S10 ran green on the host (2026-11-14); a first host run on 2026-11-13 had failed in
+  the suite's setup on an image pull timeout, before any test.

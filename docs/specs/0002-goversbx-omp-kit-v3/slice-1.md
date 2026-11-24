@@ -1,6 +1,6 @@
 # Slice 1: `goversbx-omp` as a v3 mixin kit
 
-Status: draft (2026-10-24) - awaiting acceptance · Epic: [`epic.md`](epic.md) · Ships in: 0.5.0 (open question 5)
+Status: superseded by epic 0003 (2026-11-10), never accepted · Epic: [`epic.md`](epic.md)
 
 One kit, one format change, no daemon change. Deliverable: `sandbox-kit/kits/goversbx-omp/` is a
 v3 mixin kit that composes with the omp-sbx oMLX mixin, with the agent-visible behaviour

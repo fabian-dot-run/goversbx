@@ -1,9 +1,9 @@
 # Epic 0003: goversbx on sbx 0.51 - one v3 kit, user defaults, `sbx env`, thin CLI
 
-Status: accepted (2026-11-10, every open question answered by the user) - slice 0 largely measured
-(see Evidence); slice 1 (remove project host sets) done, slice 2 (v3 kit + daemon fixes)
-implemented and e2e-green on 0.51 in the dev sandbox, awaiting the host run; slice 3 specified (draft, 2026-11-13, measured on 0.53.0); **supersedes epic 0002** (its v3 port becomes
-slice 1 here, for every agent at once instead of omp only)
+Status: done (2026-11-14) - slices 1-4 shipped in 0.6.0. Left over from the slice-0 spike: whether
+omp-sbx's `omlx-provider.ts` survives the composition with `omp` + `omlx-mixin` (they compose, the
+file was not checked). **Supersedes epic 0002** (its v3 port became slice 2 here, for every agent at
+once instead of omp only)
 
 ## Problem
 

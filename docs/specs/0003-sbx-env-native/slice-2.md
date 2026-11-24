@@ -1,11 +1,9 @@
 # Slice 2: one v3 kit for every agent, daemon fixes for sbx 0.51
 
-Status: implementing (2026-11-10). `./gradlew check` is green (unit, contract, launcher, kit skill
-drift); the kit was built and applied on real sbx 0.51.0 for `claude`, `opencode` and `shell`;
-`:daemon:e2eTest` is green on sbx 0.51.0 in the nested dev sandbox (Linux arm64, 5m58s, every class
-passed, `ClaudeAgentTest` skipped as usual). `done` once the user has run the suite on the macOS
-host (first kit build there creates sbx's kit builder) - and `binaryTestNative` has run, because the
-stdin write to the sbx process is a new code path for the native binary.
+Status: done (2026-11-14), released in 0.6.0. `./gradlew check` green; the kit built and applied on
+real sbx 0.51.0 for `claude`, `opencode` and `shell`; `:daemon:e2eTest` green on sbx 0.51.0 in the
+nested dev sandbox and on sbx 0.53.0 on the macOS host; `binaryTestNative` (the stdin write to the
+sbx process) green on the host.
 
 ## Problem
 
@@ -79,5 +77,7 @@ only switches to the one kit.
 
 ## Open questions
 
-- pi and omp against the v3 kit on a real host (the bash e2e scripts were adapted, not rerun), and
-  the composition with omp-sbx's `omp` + `omlx-mixin` - both need the host.
+- pi and omp against the v3 kit on a real host: answered 2026-11-14, `scripts/e2e-pi.sh` and
+  `e2e-omp.sh` pass on sbx 0.53.0 including the kit's registration (step 4c); a real agent (step 5)
+  has not run. The composition with omp-sbx's `omp` + `omlx-mixin` works; whether `omlx-provider.ts`
+  is intact in it was not checked.
